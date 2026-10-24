@@ -1,0 +1,44 @@
+# 拾色 GRAFT 口令网关  →  /etc/systemd/system/graft-gate.service
+[Unit]
+Description=GRAFT passcode gate
+After=network.target
+
+[Service]
+User=graftgate
+Group=graftgate
+ExecStart=/usr/bin/python3 -I /opt/graft/gate.py --conf /etc/graft serve --bind 127.0.0.1 --port 8091
+Restart=on-failure
+RestartSec=2
+
+# ── 沙箱:就算网关被打穿,也碰不到系统其它部分
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/etc/graft /opt/graft
+IPAddressDeny=any
+IPAddressAllow=localhost
+UMask=0077
+MemoryMax=256M
+TasksMax=512
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
