@@ -77,7 +77,7 @@
     <div class="go">点击 / 按任意键 开始</div>
     <div class="keys">
       <kbd>A</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳　　<kbd>左键</kbd> 贴一格　<kbd>右键</kbd> 削一格<br>
-      <kbd>1</kbd>–<kbd>5</kbd> 选材料　<kbd>R</kbd> 重来
+      <kbd>S</kbd> 把材料放在地上　<kbd>E</kbd> 捡起来　<kbd>1</kbd>–<kbd>5</kbd> 选材料　<kbd>R</kbd> 重来
     </div>
   </div>
 </div>
@@ -99,19 +99,24 @@ function hash(x,y){
   return ((h ^ (h>>16)) >>> 0) / 4294967295;
 }
 
-// ───────────────────────────────────────────── 材质
+// ───────────────────────────────────────────── 材质:每种都有一个"世界动词"
 const MAT = {
-  meat:  {id:1,label:'肉', c:'#ff8fa3', c2:'#d75f78', edge:'#4a1526', w:1.0, hard:1},
-  grass: {id:2,label:'草', c:'#8be05c', c2:'#4f9e37', edge:'#1b3b11', w:0.5, hard:1},
-  stone: {id:3,label:'石', c:'#a9aebe', c2:'#6d7283', edge:'#22252e', w:2.8, hard:3},
-  water: {id:4,label:'水', c:'#63d2ff', c2:'#2a8fbf', edge:'#0a2a3c', w:0.3, hard:0},
-  fire:  {id:5,label:'火', c:'#ffb02e', c2:'#e0551b', edge:'#401104', w:0.8, hard:3},
+  //        硬度  重量   动词
+  meat:  {id:1,label:'肉', c:'#ff8fa3', c2:'#d75f78', edge:'#4a1526', w:1.0, hard:1, verb:'基准'},
+  grass: {id:2,label:'草', c:'#8be05c', c2:'#4f9e37', edge:'#1b3b11', w:0.4, hard:1, verb:'生长'},
+  stone: {id:3,label:'石', c:'#a9aebe', c2:'#6d7283', edge:'#22252e', w:3.0, hard:3, verb:'压重'},
+  water: {id:4,label:'水', c:'#63d2ff', c2:'#2a8fbf', edge:'#0a2a3c', w:0.3, hard:0, verb:'凝石'},
+  fire:  {id:5,label:'火', c:'#ffb02e', c2:'#e0551b', edge:'#401104', w:0.8, hard:3, verb:'焚烧'},
 };
 const ORDER = ['meat','grass','stone','water','fire'];
 const BY_ID = {};
 for (const k of ORDER) BY_ID[MAT[k].id] = MAT[k];
 
-const TILE = {EMPTY:0, STONE:1, CRUMBLE:2, LAVA:3};
+const TILE = {EMPTY:0, STONE:1, CRUMBLE:2, LAVA:3, VINE:4, DOOR:5, PLATE:6};
+const doorId = new Uint8Array(GW*GH);   // 每格属于哪扇门(-1 表示不是门)
+let doorOpen = {};                       // 门 id -> 是否打开
+let plateList = [];                      // 压板
+let blockList = [];                      // 掉在地上的物块
 
 // ───────────────────────────────────────────── 声音
 let AC = null, muted = false;
@@ -147,6 +152,8 @@ addEventListener('keydown', e=>{
   if (['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code)) e.preventDefault();
   if (e.code === 'Space') { jumpBuf = 0.13; kJump = true; }
   if (e.code === 'KeyR') { if (state==='play'||state==='dead') loadLevel(level); }
+  if (e.code === 'KeyS') dropBlock();
+  if (e.code === 'KeyE') pickBlock();
   if (e.code === 'KeyN' && state==='play') { nextLevel(); }
   if (e.code === 'KeyM') { muted = !muted; toast(muted?'静音':'有声'); }
   const n = ['Digit1','Digit2','Digit3','Digit4','Digit5'].indexOf(e.code);
@@ -183,7 +190,17 @@ cv.addEventListener('wheel', e=>{
 const grid = new Uint8Array(GW*GH);
 function gt(x,y){ if (x<0||y<0||x>=GW||y>=GH) return TILE.STONE; return grid[y*GW+x]; }
 function setT(x,y,v){ if (x<0||y<0||x>=GW||y>=GH) return; grid[y*GW+x] = v; }
-function solidAt(x,y){ const t = gt(x,y); return t===TILE.STONE || t===TILE.CRUMBLE; }
+function solidAt(x,y){
+  const t = gt(x,y);
+  if (t===TILE.STONE || t===TILE.CRUMBLE || t===TILE.VINE || t===TILE.PLATE) return true;
+  if (t===TILE.DOOR) return !doorOpen[doorId[y*GW+x]];
+  return false;
+}
+// 门/压板/藤蔓 —— 供玩家与方块共用的"脚下那一格"
+function feetTile(rect){
+  const y = Math.floor((rect.y + rect.h) / CELL);
+  return { x0: Math.floor(rect.x/CELL), x1: Math.floor((rect.x+rect.w-0.001)/CELL), y };
+}
 function boxSolid(px,py,w,h){
   if (w<=0||h<=0) return false;
   const x0 = Math.floor(px/CELL), x1 = Math.floor((px+w-0.001)/CELL);
@@ -195,74 +212,129 @@ function tileAtPoint(px,py){ return gt(Math.floor(px/CELL), Math.floor(py/CELL))
 
 // ───────────────────────────────────────────── 关卡
 const LEVELS = [
+  // ══════════ 教学 ══════════
   {
-    name:'壹 · 缝隙',
-    hint:'<b>右键</b>削掉自己身上的格子 —— 削扁了才钻得进墙缝　·　<b>左键</b>贴回去　·　A D 移动 / 空格 跳',
+    name:'教学 1 · 削薄',
+    hint:'<b>右键</b>削掉身上的格子 —— 墙缝只有一格高,你得先把自己削掉一层',
     start:[6,37],
     rects:[
       {x:0,y:40,w:80,h:4,t:'stone'},
-      {x:0,y:22,w:80,h:3,t:'stone'},
-      {x:28,y:25,w:2,h:13,t:'stone'},
-      {x:48,y:25,w:2,h:14,t:'stone'},
-      {x:62,y:33,w:6,h:1,t:'stone'},
+      {x:0,y:22,w:80,h:2,t:'stone'},
+      {x:24,y:25,w:2,h:13,t:'stone'},
+      {x:40,y:25,w:2,h:14,t:'stone'},
+      {x:52,y:25,w:19,h:14,t:'stone'},
     ],
-    items:[ {c:[11,38],m:'grass'}, {c:[19,38],m:'stone'}, {c:[22,38],m:'meat'}, {c:[40,38],m:'grass'} ],
-    enemies:[],
-    exit:[73,37,3,3],
+    items:[ {c:[12,38],m:'meat'}, {c:[18,38],m:'grass'}, {c:[32,38],m:'meat'}, {c:[46,38],m:'meat'} ],
+    exit:[74,37,3,3],
   },
   {
-    name:'贰 · 撑不住',
-    hint:'石很重。站在脆地板上,重量够了它自己会裂',
+    name:'教学 2 · 搭桥',
+    hint:'<b>草</b>会自己长。削扁钻过矮洞,再让草把你摊长 —— 身体够长,就能架在沟上',
+    start:[6,37],
+    rects:[
+      {x:0,y:40,w:29,h:4,t:'stone'},
+      {x:34,y:40,w:46,h:4,t:'stone'},
+      {x:0,y:22,w:80,h:2,t:'stone'},
+      {x:26,y:38,w:12,h:1,t:'stone'},
+      {x:29,y:41,w:5,h:3,t:'lava'},
+    ],
+    items:[ {c:[12,38],m:'grass'},{c:[15,38],m:'grass'},{c:[18,38],m:'grass'},{c:[21,38],m:'grass'},{c:[24,38],m:'grass'} ],
+    exit:[70,37,3,3],
+  },
+  {
+    name:'教学 3 · 压板',
+    hint:'压板压得住才开门,你一走开它就关上。试试按 <b>S</b> 把<b>石头</b>放在板上',
+    start:[6,37],
+    rects:[
+      {x:0,y:40,w:80,h:4,t:'stone'},
+      {x:0,y:22,w:80,h:2,t:'stone'},
+      {x:30,y:25,w:2,h:11,t:'stone'},
+    ],
+    doors:[ {x:30,y:36,w:2,h:4,id:0} ],
+    plates:[ {x:16,y:40,w:3,id:0,need:2.5} ],
+    items:[ {c:[6,38],m:'stone'},{c:[9,38],m:'stone'},{c:[12,38],m:'meat'} ],
+    exit:[70,37,3,3],
+  },
+  {
+    name:'教学 4 · 压碎',
+    hint:'够重,脆地板会整片塌下去。塌完空间变窄 —— 记得再把自己削薄',
     start:[6,37],
     rects:[
       {x:0,y:40,w:44,h:1,t:'stone'},
       {x:44,y:40,w:8,h:1,t:'crumble'},
       {x:52,y:40,w:28,h:1,t:'stone'},
       {x:0,y:22,w:80,h:2,t:'stone'},
-      {x:20,y:33,w:6,h:1,t:'stone'},
-      {x:33,y:28,w:7,h:1,t:'stone'},
+      {x:50,y:41,w:20,h:2,t:'stone'},
     ],
-    items:[ {c:[20,39],m:'stone'}, {c:[24,39],m:'stone'}, {c:[36,39],m:'stone'}, {c:[30,38],m:'grass'} ],
-    enemies:[],
-    exit:[49,41,3,3],
+    items:[ {c:[20,39],m:'stone'},{c:[24,39],m:'stone'},{c:[36,38],m:'meat'} ],
+    exit:[70,41,3,3],
   },
   {
-    name:'叁 · 过火',
-    hint:'身上带水,岩浆只烧水不烧你。水会蒸发,别磨蹭',
+    name:'教学 5 · 凝石',
+    hint:'水碰到岩浆,会把它凝成石头,自己就没了。<b>一格水换一格桥</b> —— 数好再走',
     start:[6,37],
     rects:[
-      {x:0,y:40,w:25,h:4,t:'stone'},
-      {x:25,y:42,w:31,h:2,t:'lava'},
-      {x:56,y:40,w:24,h:4,t:'stone'},
+      {x:0,y:40,w:28,h:4,t:'stone'},
+      {x:28,y:40,w:6,h:1,t:'lava'},
+      {x:28,y:41,w:6,h:3,t:'stone'},
+      {x:34,y:40,w:46,h:4,t:'stone'},
       {x:0,y:22,w:80,h:2,t:'stone'},
-      {x:14,y:34,w:5,h:1,t:'stone'},
-      {x:60,y:34,w:5,h:1,t:'stone'},
     ],
-    items:[ {c:[11,39],m:'water'},{c:[13,39],m:'water'},{c:[15,39],m:'water'},
-            {c:[18,39],m:'water'},{c:[20,39],m:'water'},{c:[22,39],m:'water'},
-            {c:[60,33],m:'fire'},{c:[62,33],m:'fire'} ],
-    enemies:[ {c:[66,37],w:3,h:3,m:'meat'} ],
-    exit:[73,37,3,3],
+    items:[ {c:[12,38],m:'water'},{c:[14,38],m:'water'},{c:[16,38],m:'water'},
+            {c:[18,38],m:'water'},{c:[20,38],m:'water'},{c:[22,38],m:'water'} ],
+    exit:[70,37,3,3],
   },
   {
-    name:'肆 · 硬碰硬',
-    hint:'撞上去比的是接触面的材质:火/石 硬　肉/草 中　水 软',
+    name:'教学 6 · 焚烧',
+    hint:'藤蔓怕火。贴一格<b>火</b>上去,整面墙会顺着烧穿 —— 但火也会啃你自己',
     start:[6,37],
     rects:[
       {x:0,y:40,w:80,h:4,t:'stone'},
       {x:0,y:22,w:80,h:2,t:'stone'},
-      {x:18,y:33,w:7,h:1,t:'stone'},
-      {x:38,y:33,w:7,h:1,t:'stone'},
-      {x:28,y:27,w:7,h:1,t:'stone'},
     ],
-    items:[ {c:[8,38],m:'stone'},{c:[10,38],m:'stone'},{c:[12,38],m:'fire'},
-            {c:[14,38],m:'fire'},{c:[16,38],m:'water'},{c:[6,38],m:'grass'} ],
-    enemies:[
-      {c:[44,37],w:3,h:3,m:'meat',speed:44},
-      {c:[55,37],w:3,h:3,m:'meat',speed:50},
-      {c:[66,36],w:5,h:4,m:'stone',speed:26,big:true},
+    vines:[ {x:34,y:24,w:3,h:16} ],
+    items:[ {c:[12,38],m:'fire'},{c:[15,38],m:'fire'},{c:[18,38],m:'meat'},{c:[44,38],m:'meat'} ],
+    exit:[70,37,3,3],
+  },
+  // ══════════ 组合 ══════════
+  {
+    name:'组合 1 · 一石二鸟',
+    hint:'先让石头替你踩住压板,再把自己摊平摊长 —— 门和沟,一样一样来',
+    start:[6,37],
+    rects:[
+      {x:0,y:40,w:32,h:4,t:'stone'},
+      {x:38,y:40,w:42,h:4,t:'stone'},
+      {x:0,y:22,w:80,h:2,t:'stone'},
+      {x:20,y:25,w:2,h:11,t:'stone'},
+      {x:30,y:38,w:12,h:1,t:'stone'},
+      {x:32,y:41,w:6,h:3,t:'lava'},
     ],
-    exit:[75,37,3,3], lock:true,
+    doors:[ {x:20,y:36,w:2,h:4,id:0} ],
+    plates:[ {x:10,y:40,w:3,id:0,need:2.5} ],
+    items:[ {c:[4,38],m:'stone'},{c:[6,38],m:'stone'},
+            {c:[24,38],m:'grass'},{c:[26,38],m:'grass'},{c:[28,38],m:'grass'} ],
+    exit:[70,37,3,3],
+  },
+  {
+    name:'终关 · 四件事',
+    hint:'薄、长、重、水、火 —— 你现在有的全部。慢慢来',
+    start:[6,37],
+    rects:[
+      {x:0,y:40,w:80,h:4,t:'stone'},
+      {x:0,y:22,w:80,h:2,t:'stone'},
+      {x:14,y:25,w:10,h:14,t:'stone'},
+      {x:28,y:40,w:5,h:1,t:'lava'},
+      {x:28,y:41,w:5,h:3,t:'stone'},
+      {x:56,y:25,w:2,h:11,t:'stone'},
+    ],
+    doors:[ {x:56,y:36,w:2,h:4,id:0} ],
+    plates:[ {x:50,y:40,w:3,id:0,need:2.5} ],
+    vines:[ {x:38,y:24,w:3,h:16} ],
+    items:[ {c:[24,38],m:'water'},{c:[25,38],m:'water'},{c:[26,38],m:'water'},
+            {c:[27,38],m:'water'},{c:[28,38],m:'water'},
+            {c:[33,38],m:'fire'},{c:[34,38],m:'fire'},
+            {c:[46,38],m:'stone'},{c:[47,38],m:'stone'} ],
+    exit:[72,37,3,3],
   },
 ];
 
@@ -422,17 +494,42 @@ function loadLevel(idx){
   level = clamp(idx, 0, LEVELS.length-1);
   const L = LEVELS[level];
   grid.fill(0);
+  doorId.fill(-1);
+  doorOpen = {};
+  plateList = [];
+  blockList = [];
   for (let x=1;x<GW-1;x++){ setT(x,0,TILE.STONE); setT(x,GH-1,TILE.STONE); }
   for (let y=1;y<GH-1;y++){ setT(0,y,TILE.STONE); setT(GW-1,y,TILE.STONE); }
   for (const r of (L.rects||[])){
     const t = r.t==='crumble'?TILE.CRUMBLE : r.t==='lava'?TILE.LAVA : TILE.STONE;
     for (let y=r.y;y<r.y+r.h;y++) for (let x=r.x;x<r.x+r.w;x++) setT(x,y,t);
   }
+  // 藤蔓
+  for (const v of (L.vines||[])){
+    for (let y=v.y;y<v.y+v.h;y++) for (let x=v.x;x<v.x+v.w;x++) setT(x,y,TILE.VINE);
+  }
+  // 压板(铺在地板那一格上)
+  for (const pl of (L.plates||[])){
+    for (let x=pl.x;x<pl.x+pl.w;x++) setT(x,pl.y,TILE.PLATE);
+    plateList.push({ x0:pl.x, x1:pl.x+pl.w-1, y:pl.y, id:pl.id, need:pl.need||2.5, load:0, pressed:false });
+    doorOpen[pl.id] = false;
+  }
+  // 门
+  for (const d of (L.doors||[])){
+    for (let y=d.y;y<d.y+d.h;y++) for (let x=d.x;x<d.x+d.w;x++){
+      setT(x,y,TILE.DOOR);
+      doorId[y*GW+x] = d.id;
+    }
+    if (!(d.id in doorOpen)) doorOpen[d.id] = false;
+  }
   spawnPlayer(L.start[0], L.start[1]);
   P.bag = {meat:0,grass:0,stone:0,water:0,fire:0};
   P.sel = 'stone';
   items = []; enemies = []; particles = []; floaters = [];
   for (const it of (L.items||[])) addItem(it.c[0]*CELL+4, it.c[1]*CELL+4, it.m);
+  for (const b of (L.blocks||[])){
+    blockList.push({ x:b.c[0]*CELL+2, y:b.c[1]*CELL+2, w:6, h:6, mat:b.m, vy:0 });
+  }
   for (const e of (L.enemies||[])){
     const w = e.w*CELL, h = e.h*CELL;
     const hp = (e.big?18:6);
@@ -656,33 +753,39 @@ function updatePlayer(dt){
     } else P.crumbleT = 0;
   }
 
-  // 岩浆
-  if (inLava){
-    P.lavaT += dt;
-    const hasWater = countMat('water') > 0;
-    const gap = hasWater ? 0.9 : 0.28;
-    if (P.lavaT > gap){
-      P.lavaT = 0;
+  // 岩浆:水把脚下这一格凝成石头;没水就烧你
+  {
+    const ft = feetTile(b0);
+    let onLava = false;
+    for (let x=ft.x0;x<=ft.x1;x++) if (gt(x,ft.y)===TILE.LAVA){ onLava = true; break; }
+    if (P.onGround && onLava){
+      P.lavaT += dt;
+      const hasWater = countMat('water') > 0;
       if (hasWater){
-        // 烧掉一格水
         let picked = -1;
         for (let k=0;k<MW*MH;k++) if (P.mask[k]===MAT.water.id && connectedWithout(k%MW,(k/MW)|0)) { picked = k; break; }
-        if (picked >= 0){
+        const cx = Math.floor((b0.x + b0.w/2)/CELL);
+        if (picked >= 0 && gt(cx,ft.y)===TILE.LAVA){
+          P.mask[picked] = 0;
+          setT(cx, ft.y, TILE.STONE);
           const w = cellWorld(picked%MW,(picked/MW)|0);
           burst(w.x+4,w.y+4,'#cfeaff',10,90,2);
-          P.mask[picked] = 0;
-          tone(900, 400, 0.12, 'sine', 0.04);
+          burst(cx*CELL+4, ft.y*CELL+2, '#9fe4ff', 9, 90, 2);
+          tone(820, 320, 0.14, 'sine', 0.05);
+          shake = Math.max(shake, 3);
+          syncBag();
         }
-      } else {
+      } else if (P.lavaT > 0.15){
+        P.lavaT = 0;
         damagePlayerNear(b0.x+b0.w/2, b0.y+b0.h);
       }
-    }
-  } else P.lavaT = 0;
+    } else P.lavaT = 0;
+  }
 
-  // 草再生
-  if (countMat('grass') > 0 && bounds().n < 22){
+  // 草生长
+  if (countMat('grass') > 0 && bounds().n < 30){
     P.regenT += dt;
-    if (P.regenT > 3.2){
+    if (P.regenT > 2.0){
       P.regenT = 0;
       const cands = [];
       for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
@@ -708,7 +811,7 @@ function updatePlayer(dt){
   // 火烧自己
   if (countMat('fire') > 0){
     P.burnT += dt;
-    if (P.burnT > 2.4){
+    if (P.burnT > 4.5){
       P.burnT = 0;
       let picked = -1;
       for (let k=MW*MH-1;k>=0;k--) if (P.mask[k]===MAT.fire.id && connectedWithout(k%MW,(k/MW)|0)) { picked = k; break; }
@@ -721,23 +824,6 @@ function updatePlayer(dt){
       }
     }
   } else P.burnT = 0;
-
-  // 水蒸发
-  if (countMat('water') > 0){
-    P.evapT += dt;
-    if (P.evapT > 7){
-      P.evapT = 0;
-      let picked = -1;
-      for (let k=MW*MH-1;k>=0;k--) if (P.mask[k]===MAT.water.id && connectedWithout(k%MW,(k/MW)|0)) { picked = k; break; }
-      if (picked >= 0){
-        const w = cellWorld(picked%MW,(picked/MW)|0);
-        burst(w.x+4,w.y+4,'#9fe4ff',5,60,1);
-        P.mask[picked] = 0;
-        P.bag.water++;
-        syncBag();
-      }
-    }
-  } else P.evapT = 0;
 }
 
 function countMat(key){
@@ -890,6 +976,131 @@ function updateParticles(dt){
   }
 }
 
+// ───────────────────────────────────────────── 压板 / 门 / 方块 / 藤蔓
+function overlapX(a0,a1,b0,b1){ return a0 <= b1 && a1 >= b0; }
+
+function updateWires(){
+  for (const p of plateList) p.load = 0;
+  const b = bounds();
+  if (!b.empty){
+    const ft = feetTile(b);
+    for (const p of plateList){
+      if (p.y === ft.y && overlapX(ft.x0, ft.x1, p.x0, p.x1)) p.load += weight();
+    }
+  }
+  for (const bl of blockList){
+    const ft = feetTile(bl);
+    for (const p of plateList){
+      if (p.y === ft.y && overlapX(ft.x0, ft.x1, p.x0, p.x1)) p.load += MAT[bl.mat].w;
+    }
+  }
+  const next = {};
+  for (const p of plateList){
+    const was = p.pressed;
+    p.pressed = p.load >= p.need - 0.001;
+    if (p.pressed && !was){
+      burst((p.x0+p.x1+1)*CELL/2, p.y*CELL+2, '#9fe4ff', 7, 70, 1);
+      tone(680, 940, 0.07, 'square', 0.045);
+    } else if (!p.pressed && was){
+      tone(300, 200, 0.07, 'square', 0.035);
+    }
+    if (p.pressed) next[p.id] = true;
+  }
+  for (const id in doorOpen){
+    let open = !!next[id];
+    if (!open && !b.empty){
+      // 人还在门框里时别关门夹住他
+      const x0 = Math.floor(b.x/CELL), x1 = Math.floor((b.x+b.w-1)/CELL);
+      const y0 = Math.floor(b.y/CELL), y1 = Math.floor((b.y+b.h-1)/CELL);
+      for (let y=y0;y<=y1 && !open;y++) for (let x=x0;x<=x1;x++){
+        if (gt(x,y)===TILE.DOOR && doorId[y*GW+x] === +id){ open = true; break; }
+      }
+    }
+    doorOpen[id] = open;
+  }
+}
+
+function updateBlocks(dt){
+  for (const bl of blockList){
+    bl.born = Math.max(0, (bl.born||0) - dt);
+    bl.vy = Math.min(bl.vy + GRAV*dt, 620);
+    let steps = Math.max(1, Math.ceil(bl.vy*dt));
+    const d = bl.vy*dt/steps;
+    for (let s=0;s<steps;s++){
+      if (boxSolid(bl.x, bl.y+d, bl.w, bl.h)) {
+        bl.vy = 0;
+        // 落地时把底边吸附到格子边界,否则压板认不出来
+        const bottom = bl.y + bl.h;
+        const snap = Math.ceil((bottom - 1e-4)/CELL)*CELL;
+        if (snap - bottom < CELL && !boxSolid(bl.x, bl.y + (snap-bottom), bl.w, bl.h)) bl.y += snap - bottom;
+        break;
+      }
+      bl.y += d;
+    }
+  }
+}
+
+function dropBlock(){
+  if (state !== 'play') return;
+  if (P.bag[P.sel] <= 0){ P.denyT = 0.3; tone(140,110,0.06,'square',0.04); return; }
+  const b = bounds(); if (b.empty) return;
+  // 放在自己脚下,这样站在压板上按 S 就能压住
+  let bx = b.x + (b.w - 6) / 2;
+  let by = b.y + b.h - 7;
+  if (boxSolid(bx, by, 6, 6)) { bx = b.x + (P.face>0 ? b.w + 1 : -7); }
+  if (boxSolid(bx, by, 6, 6)) bx = b.x + (b.w-6)/2;
+  P.bag[P.sel]--;
+  blockList.push({ x:bx, y:by, w:6, h:6, mat:P.sel, vy:0, born:0.25 });
+  burst(bx+3, by+3, MAT[P.sel].c, 7, 70, 2);
+  tone(360, 230, 0.08, 'square', 0.05);
+  syncBag();
+}
+
+function pickBlock(){
+  const b = bounds(); if (b.empty) return;
+  for (let i=blockList.length-1;i>=0;i--){
+    const bl = blockList[i];
+    if (bl.x+bl.w > b.x-14 && bl.x < b.x+b.w+14 && bl.y+bl.h > b.y-14 && bl.y < b.y+b.h+14){
+      P.bag[bl.mat]++;
+      burst(bl.x+3, bl.y+3, MAT[bl.mat].c, 7, 70, 2);
+      blockList.splice(i,1);
+      ensureSel(bl.mat);
+      syncBag();
+      tone(880, 1240, 0.05, 'triangle', 0.04);
+      return;
+    }
+  }
+}
+
+function burnVines(){
+  let hit = null;
+  for (let j=0;j<MH && !hit;j++) for (let i=0;i<MW;i++){
+    if (P.mask[j*MW+i] !== MAT.fire.id) continue;
+    const w = cellWorld(i,j);
+    const cx = Math.floor((w.x+4)/CELL), cy = Math.floor((w.y+4)/CELL);
+    for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      if (gt(cx+dx, cy+dy) === TILE.VINE){ hit = [cx+dx, cy+dy]; break; }
+    }
+    if (hit) break;
+  }
+  if (!hit) return;
+  const stack = [hit], seen = {};
+  let n = 0;
+  while (stack.length && n < 600){
+    const c = stack.pop(), k = c[0]+','+c[1];
+    if (seen[k] || gt(c[0],c[1]) !== TILE.VINE) continue;
+    seen[k] = 1; n++;
+    setT(c[0],c[1],TILE.EMPTY);
+    burst(c[0]*CELL+4, c[1]*CELL+4, '#ff9a3c', 4, 80, 2);
+    stack.push([c[0]+1,c[1]],[c[0]-1,c[1]],[c[0],c[1]+1],[c[0],c[1]-1]);
+  }
+  if (n){
+    shake = Math.max(shake, 9);
+    tone(200, 55, 0.45, 'sawtooth', 0.07);
+    toast('烧穿了');
+  }
+}
+
 // ───────────────────────────────────────────── 主更新
 function update(dt){
   time += dt;
@@ -916,6 +1127,9 @@ function update(dt){
   updatePlayer(dt);
   updateEnemies(dt);
   updateItems(dt);
+  updateBlocks(dt);
+  updateWires();
+  burnVines();
   updateParticles(dt);
   camFollow(dt);
 
@@ -995,6 +1209,47 @@ function drawTiles(){
       }
       const bub = Math.sin(tt*1.7 + y)*0.5+0.5;
       if (bub > 0.86){ ctx.fillStyle = '#ffd76a'; ctx.fillRect(px+3, py+4, 2,1); }
+    } else if (t === TILE.VINE){
+      const h = hash(x,y);
+      ctx.fillStyle = '#1d3a1c'; ctx.fillRect(px,py,CELL,CELL);
+      ctx.fillStyle = '#2b5526'; ctx.fillRect(px, py, CELL, CELL-1);
+      ctx.fillStyle = '#3f7a33';
+      ctx.fillRect(px+1, py+1, 2, 6);
+      ctx.fillRect(px+5, py+2, 2, 5);
+      ctx.fillStyle = '#2a4a22';
+      ctx.fillRect(px+3, py+3, 1, 4);
+      if (h > 0.55){ ctx.fillStyle = '#5b9c41'; ctx.fillRect(px+1, py+1, 1, 2); }
+      if (h > 0.8){ ctx.fillStyle = '#7ec45a'; ctx.fillRect(px+5, py+3, 1, 1); }
+    } else if (t === TILE.DOOR){
+      const open = doorOpen[doorId[y*GW+x]];
+      if (open){
+        ctx.fillStyle = 'rgba(120,110,150,0.14)'; ctx.fillRect(px,py,CELL,CELL);
+        ctx.fillStyle = 'rgba(150,180,230,0.28)'; ctx.fillRect(px,py,1,CELL);
+        ctx.fillRect(px+7,py,1,CELL);
+      } else {
+        ctx.fillStyle = '#2b2a3a'; ctx.fillRect(px,py,CELL,CELL);
+        ctx.fillStyle = '#5d5b7a'; ctx.fillRect(px+1, py, 2, CELL);
+        ctx.fillRect(px+5, py, 2, CELL);
+        ctx.fillStyle = '#7d7ba0'; ctx.fillRect(px+1, py+1, 1, 3);
+        ctx.fillStyle = '#8f8db3'; ctx.fillRect(px+5, py+5, 1, 3);
+      }
+    } else if (t === TILE.PLATE){
+      const p = plateList.find(q => q.y === y && q.x0 <= x && x <= q.x1);
+      const down = p && p.pressed;
+      ctx.fillStyle = '#15141c'; ctx.fillRect(px,py,CELL,CELL);
+      ctx.fillStyle = down ? '#33505f' : '#3d4f5e';
+      ctx.fillRect(px+1, py+1, CELL-2, CELL-2);
+      ctx.fillStyle = down ? '#9fe4ff' : '#8fa8bb';
+      ctx.fillRect(px+1, py+1, CELL-2, 1);
+      ctx.fillStyle = '#0e0d14';
+      ctx.fillRect(px+1, py+5, CELL-2, 1);
+      if (down){
+        ctx.fillStyle = 'rgba(159,228,255,'+(0.25+0.2*Math.sin(time*8))+')';
+        ctx.fillRect(px+2, py+2, CELL-4, 3);
+      } else {
+        ctx.fillStyle = '#5d7382';
+        ctx.fillRect(px+3, py+3, 2, 2);
+      }
     }
   }
 }
@@ -1073,6 +1328,22 @@ function drawBlob(cells, w, h, x0, y0, edge, outline, alpha){
     if (!cells(i+1,j)) { ctx.fillStyle = outline; ctx.fillRect(x+CELL-1,y-1,2,CELL+2); }
   }
   ctx.globalAlpha = 1;
+}
+
+function drawBlocks(){
+  for (const bl of blockList){
+    const m = MAT[bl.mat] || MAT.meat;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(bl.x-1, bl.y+bl.h+1, bl.w+2, 2);
+    ctx.fillStyle = m.edge;
+    ctx.fillRect(bl.x-1, bl.y-1, bl.w+2, bl.h+2);
+    ctx.fillStyle = m.c;
+    ctx.fillRect(bl.x, bl.y, bl.w, bl.h);
+    ctx.fillStyle = m.c2;
+    ctx.fillRect(bl.x, bl.y+bl.h-2, bl.w, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(bl.x+1, bl.y, bl.w-2, 1);
+  }
 }
 
 function drawPlayer(){
@@ -1328,6 +1599,7 @@ function render(){
   ctx.fillRect(cam.x-8, 318, VIEW_W+16, 44);
   drawExit();
   drawItems();
+  drawBlocks();
   drawEnemies();
   drawPlayer();
   drawParticles();
@@ -1406,6 +1678,9 @@ window.__game = {
   enemies: ()=> enemies, bounds,
   place: tryPlace, remove: tryRemove,
   tile: (x,y)=> gt(x,y), weight: weight, locked: ()=> exitLocked,
+  doors: ()=> ({...doorOpen}), plates: ()=> plateList.map(p=>({id:p.id,load:+p.load.toFixed(1),pressed:p.pressed})),
+  blocks: ()=> blockList,
+  vineCount: ()=> grid.reduce((n,t)=>n+(t===TILE.VINE?1:0),0),
   setMouse: (x,y)=>{ mouse.x = x; mouse.y = y; mouse.inside = true; },
   get cam(){ return cam; },
 };
