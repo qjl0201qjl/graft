@@ -14,6 +14,7 @@ function makeCtx(){
 }
 function makeEl(tag){
   const cls = new Set();
+  const listeners = new Map();
   return {
     tagName: (tag||'div').toUpperCase(), width:300, height:150, children:[], textContent:'', innerHTML:'',
     style: { setProperty(){} },
@@ -22,7 +23,9 @@ function makeEl(tag){
                  contains:c=>cls.has(c) },
     _ctx:null,
     getContext(){ return this._ctx || (this._ctx = makeCtx()); },
-    addEventListener(){}, removeEventListener(){},
+    addEventListener(type, fn){ if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
+    removeEventListener(type, fn){ listeners.get(type)?.delete(fn); },
+    dispatchEvent(event){ for (const fn of listeners.get(event.type) || []) fn(event); },
     querySelector(){ return makeEl(); }, querySelectorAll(){ return [makeEl(), makeEl()]; },
     append(...c){ this.children.push(...c); }, appendChild(c){ this.children.push(c); return c; },
     getBoundingClientRect(){ return {left:0, top:0, width:640, height:360}; },
@@ -31,7 +34,7 @@ function makeEl(tag){
 }
 function boot(opts){
   opts = opts || {};
-  const els = {}, ls = new Map();
+  const els = {}, ls = new Map(), listeners = new Map();
   const document = {
     hidden:false,
     getElementById(id){ return els[id] || (els[id] = makeEl()); },
@@ -44,7 +47,9 @@ function boot(opts){
     location:{ search: opts.search || '', reload(){} },
     localStorage:{ getItem:k=> ls.has(k)?ls.get(k):null, setItem:(k,v)=>ls.set(k,String(v)), removeItem:k=>ls.delete(k) },
     matchMedia:()=>({matches: !!opts.touch}),
-    addEventListener(){}, removeEventListener(){},
+    addEventListener(type, fn){ if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(fn); },
+    removeEventListener(type, fn){listeners.get(type)?.delete(fn);},
+    dispatchEvent(event){for(const fn of listeners.get(event.type)||[])fn(event);},
     requestAnimationFrame(){}, performance:{ now:()=> Date.now() },
     setTimeout, clearTimeout, setInterval, clearInterval, URLSearchParams, Math, JSON, console,
   };

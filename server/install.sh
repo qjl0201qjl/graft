@@ -3,6 +3,8 @@
 #
 #   有域名(推荐):sudo bash install.sh --domain game.example.com --email you@example.com
 #   只有公网 IP:  sudo bash install.sh --http-only
+#   和已有网站共存:sudo bash install.sh --port 8080
+#                  (只用 8080 端口,不碰 80 端口上已有的网站和 nginx 默认站点;默认不做系统加固)
 #
 # 可选参数:
 #   --trusted "1.2.3.0/24 5.6.7.8"   不限流、不封禁的 IP(校园网出口、你压测用的机器)
@@ -14,7 +16,7 @@
 # 重复运行是安全的:已有的口令、密钥、证书都会保留。
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOMAIN=""; EMAIL=""; HTTP_ONLY=0; TRUSTED=""; SSH_PORT=22; HARDEN=1; HARDEN_ARGS=()
+DOMAIN=""; EMAIL=""; HTTP_ONLY=0; TRUSTED=""; SSH_PORT=22; HARDEN=1; HARDEN_ARGS=(); PORT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --domain) DOMAIN="$2"; shift 2;;
@@ -25,6 +27,8 @@ while [[ $# -gt 0 ]]; do
     --allow-ports) HARDEN_ARGS+=(--allow-ports "$2"); shift 2;;
     --force-ssh-keys) HARDEN_ARGS+=(--force-ssh-keys); shift;;
     --no-harden) HARDEN=0; shift;;
+    --harden) HARDEN=2; shift;;
+    --port) PORT="$2"; HTTP_ONLY=1; shift 2;;
     -h|--help) sed -n '2,17p' "$0"; exit 0;;
     *) echo "未知参数 $1(--help 查看用法)"; exit 1;;
   esac
@@ -40,6 +44,10 @@ if [[ $HTTP_ONLY -eq 0 ]]; then
   [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "域名格式不对:$DOMAIN"
   [[ -n "$EMAIL" ]] || die "申请 HTTPS 证书需要 --email(证书快过期时 Let's Encrypt 会发邮件提醒)"
 fi
+if [[ -n "$PORT" ]]; then
+  [[ "$PORT" =~ ^[0-9]+$ && "$PORT" -ge 1024 && "$PORT" -le 65535 && "$PORT" -ne 8091 ]] || die "端口要在 1024–65535 之间,且不能是 8091(网关在用)"
+  [[ $HARDEN -eq 2 ]] || HARDEN=0      # 共存模式:不动 SSH / 防火墙,免得影响服务器上已有的项目
+fi
 DEPLOY_USER="${SUDO_USER:-root}"
 for f in gate.py graft-gate.service harden.sh nginx/graft-http.conf nginx/graft-app.conf; do
   [[ -f "$HERE/$f" ]] || die "缺少文件 $HERE/$f,请把整个 server 目录传上来"
@@ -49,12 +57,40 @@ done
 say "安装软件包"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+NGINX_WAS_ACTIVE=0; systemctl is-active --quiet nginx && NGINX_WAS_ACTIVE=1
+POLICY_BACKUP=""; POLICY_CREATED=0
+restore_policy(){
+  if [[ $POLICY_CREATED -eq 1 ]]; then
+    rm -f /usr/sbin/policy-rc.d
+    [[ -z "$POLICY_BACKUP" ]] || mv "$POLICY_BACKUP" /usr/sbin/policy-rc.d
+    POLICY_CREATED=0
+  fi
+}
+trap restore_policy EXIT
+if [[ -n "$PORT" && $NGINX_WAS_ACTIVE -eq 0 ]]; then
+  # 包含上次安装中断的情况;配置独立端口前禁止包安装自动抢占 80。
+  if [[ -e /usr/sbin/policy-rc.d || -L /usr/sbin/policy-rc.d ]]; then
+    POLICY_BACKUP=$(mktemp /usr/sbin/graft-policy-backup.XXXXXX)
+    cp -a /usr/sbin/policy-rc.d "$POLICY_BACKUP"
+    rm -f /usr/sbin/policy-rc.d
+  fi
+  POLICY_CREATED=1
+  printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d
+fi
 PKGS=(nginx python3 fail2ban python3-systemd ufw unattended-upgrades rsync curl)
 [[ $HTTP_ONLY -eq 0 ]] && PKGS+=(certbot)
 apt-get install -y -qq "${PKGS[@]}" >/dev/null
+# Ubuntu 22.04 等系统自带的 nginx-core 是精简版,没有 secure_link 模块(口令校验要用);
+# 这种情况自动换成官方源里的完整版 nginx-extras(配置目录不变,只是换了可执行文件)
 NGV=$(nginx -V 2>&1)
-grep -q http_secure_link_module <<<"$NGV" || die "当前 nginx 没有 secure_link 模块。请安装 nginx-core 或 nginx-full: apt-get install nginx-core"
-grep -q http_gzip_static_module <<<"$NGV" || die "当前 nginx 没有 gzip_static 模块。请安装 nginx-core"
+if ! grep -q http_secure_link_module <<<"$NGV"; then
+  say "当前 nginx 缺少 secure_link 模块,换装完整版 nginx-extras"
+  apt-get install -y -qq nginx-extras >/dev/null || die "安装 nginx-extras 失败。请确认已启用 universe 软件源: sudo add-apt-repository universe"
+fi
+restore_policy
+NGV=$(nginx -V 2>&1)
+grep -q http_secure_link_module <<<"$NGV" || die "nginx 仍然没有 secure_link 模块,把这一行发给 Claude"
+grep -q http_gzip_static_module <<<"$NGV" || die "nginx 没有 gzip_static 模块,把这一行发给 Claude"
 say "nginx $(nginx -v 2>&1 | sed 's/.*\///') ✓ secure_link ✓ gzip_static"
 
 # ───────────────────────── 2. 账号与目录
@@ -136,17 +172,34 @@ install -m 644 "$HERE/nginx/graft-http.conf" /etc/nginx/conf.d/graft-http.conf
 for f in graft-app graft-auth graft-headers graft-csp graft-proxy; do
   install -m 644 "$HERE/nginx/$f.conf" "/etc/nginx/snippets/$f.conf"
 done
-rm -f /etc/nginx/sites-enabled/default
+if [[ -z "$PORT" ]]; then
+  rm -f /etc/nginx/sites-enabled/default
+elif [[ $NGINX_WAS_ACTIVE -eq 0 && -L /etc/nginx/sites-enabled/default ]]; then
+  # 重试中断安装时 nginx 已安装过。仅禁用未修改的发行版默认站点;
+  # 已自定义的站点保持原样。上方 BK 已备份整个配置目录。
+  DEFAULT_PATH=/etc/nginx/sites-available/default
+  EXPECTED=$(dpkg-query -W -f='${Conffiles}\n' nginx-common | awk '$1 == "/etc/nginx/sites-available/default" {print $2}')
+  ACTUAL=$(md5sum "$DEFAULT_PATH" | awk '{print $1}')
+  if [[ $(readlink -f /etc/nginx/sites-enabled/default) = "$DEFAULT_PATH" && -n "$EXPECTED" && "$ACTUAL" = "$EXPECTED" ]]; then
+    rm /etc/nginx/sites-enabled/default
+    say "已停用未修改的 nginx 默认欢迎页,独立游戏端口不会占用 80"
+  fi
+fi
 touch /var/log/nginx/graft.access.log /var/log/nginx/graft.error.log
 
 render(){ # $1=模板
   local out; out=$(sed "s/__DOMAIN__/${DOMAIN}/g" "$HERE/nginx/$1")
   [[ -f /proc/net/if_inet6 ]] || out=$(grep -v 'listen \[::\]' <<<"$out")   # 机器没开 IPv6
+  [[ -n "$PORT" ]] && out=$(sed "s/__PORT__/${PORT}/g" <<<"$out")
   printf '%s\n' "$out" > /etc/nginx/sites-available/graft
   ln -sfn /etc/nginx/sites-available/graft /etc/nginx/sites-enabled/graft
 }
 
-if [[ $HTTP_ONLY -eq 1 ]]; then
+if [[ -n "$PORT" ]]; then
+  render site-port.conf.tpl
+  if ufw status 2>/dev/null | grep -q 'Status: active'; then ufw allow "${PORT}/tcp" comment 'graft' >/dev/null; fi
+  warn "共存模式:游戏在 ${PORT} 端口,80 端口上原有的网站不受影响。记得在云服务器安全组放行 TCP ${PORT}。"
+elif [[ $HTTP_ONLY -eq 1 ]]; then
   render site-http.conf.tpl
   warn "HTTP 模式:口令和 cookie 会明文传输。有域名后请用 --domain 重新运行。"
 else
@@ -166,7 +219,7 @@ else
 fi
 nginx -t -q 2>/dev/null || { nginx -t; rollback; }
 systemctl enable nginx >/dev/null 2>&1
-systemctl reload nginx || systemctl restart nginx
+systemctl is-active --quiet nginx && systemctl reload nginx || systemctl restart nginx
 say "nginx 已加载新配置(旧配置备份在 $BK)"
 
 # ───────────────────────── 6. fail2ban
@@ -177,19 +230,24 @@ install -m 644 "$HERE/fail2ban/filter-graft-scan.conf" /etc/fail2ban/filter.d/gr
 install -m 644 "$HERE/fail2ban/filter-graft-badua.conf" /etc/fail2ban/filter.d/graft-badua.conf
 sed "s#__IGNOREIP__#${IGN}#g" "$HERE/fail2ban/jail-graft.conf.tpl" > /etc/fail2ban/jail.d/graft.conf
 sed -i -E "s/^(\[sshd\])$/\1\nport = ${SSH_PORT}/" /etc/fail2ban/jail.d/graft.conf
+if [[ -n "$PORT" && $HARDEN -eq 0 ]]; then
+  # 共存模式只保护游戏端口,不覆盖原有 SSH 防护设置。
+  sed -i '/^\[sshd\]/,/^\[graft-gate\]/{ /^\[graft-gate\]/!d; }' /etc/fail2ban/jail.d/graft.conf
+  sed -i -E "/^\[graft-[^]]+\]$/a port = ${PORT}" /etc/fail2ban/jail.d/graft.conf
+fi
 fail2ban-client -t >/dev/null || die "fail2ban 配置检查失败"
 systemctl enable fail2ban >/dev/null 2>&1
 systemctl restart fail2ban
 sleep 1; fail2ban-client status | sed 's/^/   /'
 
 # ───────────────────────── 7. 系统加固
-if [[ $HARDEN -eq 1 ]]; then
+if [[ $HARDEN -ge 1 ]]; then
   say "系统加固"
   bash "$HERE/harden.sh" "${HARDEN_ARGS[@]}"
 fi
 
 # ───────────────────────── 完成
-URL=$([[ $HTTP_ONLY -eq 1 ]] && echo "http://<服务器公网IP>/" || echo "https://$DOMAIN/")
+URL=$([[ $HTTP_ONLY -eq 1 ]] && echo "http://<服务器公网IP>${PORT:+:$PORT}/" || echo "https://$DOMAIN/")
 cat <<DONE
 
 $(printf '\033[1;32m')✓ 安装完成$(printf '\033[0m')

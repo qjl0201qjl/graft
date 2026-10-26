@@ -42,6 +42,13 @@ const MAT = {
   fire:  {id:5,key:'fire', label:'火', c:'#ffb02e', c2:'#e0551b', edge:'#401104', w:0.8, hard:3},
 };
 const ORDER = ['meat','grass','stone','water','fire'];
+const MAT_HELP = {
+  meat:'肉 · 基础身体,可削下再贴回,用来调整形状',
+  grass:'草 · 贴在身上可唤醒蘑菇、催生藤蔓;身体不会自动长草',
+  stone:'石 · 贴上变重,能压碎脆地板、踩亮重踏板;也能作护甲',
+  water:'水 · 消耗身上一格水,可冷却炽热门、关闭喷口或挡一次火',
+  fire:'火 · 贴在身上靠近荆棘自动烧开,也能克制软敌人;熄灭后回背包',
+};
 const BY_ID = {};
 for (const k of ORDER) BY_ID[MAT[k].id] = MAT[k];
 function matKey(id){ const m = BY_ID[id]; return m ? m.key : 'meat'; }
@@ -249,7 +256,7 @@ addEventListener('keyup', e=>{
   keys[e.code] = false;
   if (e.code==='Space' || e.code==='ArrowUp' || e.code==='KeyW') { if (!jumpTouch) releaseJump(); }
 });
-addEventListener('blur', ()=>{ for (const k in keys) keys[k] = false; touchDir = 0; kJump = false; });
+addEventListener('blur', clearInput);
 
 function toGame(e){
   const r = cv.getBoundingClientRect();
@@ -267,14 +274,18 @@ cv.addEventListener('pointermove', e=>{
 cv.addEventListener('pointerleave', e=>{ if (e.pointerType === 'mouse'){ mouse.inside = false; mouse.x = mouse.y = -999; } });
 cv.addEventListener('contextmenu', e=> e.preventDefault());
 cv.addEventListener('pointerdown', e=>{
-  if (state !== 'play' || editing) return;
+  if (state !== 'play' || editing || menuOpen) return;
   const p = screenToWorld(e);
   if (e.pointerType === 'mouse'){
+    if (e.button !== 0 && e.button !== 2) return;
+    e.preventDefault();
     if (touchMode) setTouchMode(false);
     mouse.x = p.x; mouse.y = p.y;
     const i = Math.floor((p.x - P.px)/CELL), j = Math.floor((p.y - P.py)/CELL);
-    if (e.button === 0) placeAt(i,j);
-    else if (e.button === 2) removeAt(i,j);
+    // 鼠标和触控板统一:点击身体削格,点击空位贴格;保留右键削格。
+    if (e.button === 2) removeAt(i,j);
+    else if (i>=0 && j>=0 && i<MW && j<MH && P.mask[j*MW+i]) removeAt(i,j);
+    else placeAt(i,j);
     return;
   }
   // 手指:点身体 = 削,点身旁空位 = 贴;容差一格,点歪了吸附到最近的合法格
@@ -310,6 +321,7 @@ function endMove(){
 }
 moveEl.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
+  if (state !== 'play' || editing || menuOpen) return;
   movePid = e.pointerId; try { moveEl.setPointerCapture(e.pointerId); } catch(_){}
   updMove(e);
 });
@@ -321,6 +333,7 @@ moveEl.addEventListener('lostpointercapture', e=>{ if (e.pointerId === movePid) 
 const jBtn = $('btnJump');
 jBtn.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
+  if (state !== 'play' || editing || menuOpen) return;
   try { jBtn.setPointerCapture(e.pointerId); } catch(_){}
   jumpTouch = true; jBtn.classList.add('down');
   if (state === 'play' && !editing) pressJump();
@@ -329,14 +342,20 @@ const jEnd = ()=>{ if (!jumpTouch) return; jumpTouch = false; jBtn.classList.rem
 jBtn.addEventListener('pointerup', jEnd);
 jBtn.addEventListener('pointercancel', jEnd);
 jBtn.addEventListener('lostpointercapture', jEnd);
+function clearInput(){
+  for (const k in keys) keys[k]=false;
+  jumpBuf=0;
+  endMove(); jEnd(); releaseJump();
+}
 
 const uBtn = $('btnUndo');
 uBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); ac(); if (!editing && !menuOpen) undo(); });
 $('edUndo').addEventListener('click', ()=> undo());
 const eBtn = $('btnEdit');
 eBtn.addEventListener('pointerdown', e=>{
-  e.preventDefault(); ac(); eBtn.classList.add('down');
-  if (state !== 'play') return;
+  e.preventDefault(); ac();
+  if (state !== 'play' || menuOpen) return;
+  eBtn.classList.add('down');
   if (editing) closeEditor(); else openEditor();
 });
 eBtn.addEventListener('pointerup', ()=> eBtn.classList.remove('down'));
@@ -365,11 +384,13 @@ fullBtn.addEventListener('click', ()=>{
 // ═════════════════════════════════════════════ 地图
 const grid = new Uint8Array(GW*GH);
 let tilesDirty = true;
+let devices = [], seeds = [], checkpoint = null;
 function gt(x,y){ if (x<0||y<0||x>=GW||y>=GH) return TILE.STONE; return grid[y*GW+x]; }
 function setT(x,y,v){ if (x<0||y<0||x>=GW||y>=GH) return; grid[y*GW+x] = v; tilesDirty = true; }
 function solidAt(x,y){ const t = gt(x,y); return t===TILE.STONE || t===TILE.CRUMBLE; }
 function boxSolid(px,py,w,h){
   if (w<=0||h<=0) return false;
+  if (devices.some(d=>['gate','bramble','emberwall'].includes(d.type) && !d.open && rectOverlap({x:px,y:py,w,h},d))) return true;
   const x0 = Math.floor(px/CELL), x1 = Math.floor((px+w-0.001)/CELL);
   const y0 = Math.floor(py/CELL), y1 = Math.floor((py+h-0.001)/CELL);
   for (let y=y0;y<=y1;y++) for (let x=x0;x<=x1;x++) if (solidAt(x,y)) return true;
@@ -381,22 +402,22 @@ function tileAtPoint(px,py){ return gt(Math.floor(px/CELL), Math.floor(py/CELL))
 const THEMES = {
   violet:{ bg:['#0e0c17','#0b0a12','#07060b'], glow:'92,68,160', far:'24,19,37', mid:'17,13,28',
            rock:['#2e2b39','#2a2734','#33303f'], top:['#4a4659','#5b566d'], under:'#191720', sideL:'#3a3748', sideR:'#1d1a26',
-           moss:['#3f8f73','#62c79a'], crystal:'#b58cff', mush:'#8be0ff', spore:'#b9a6ff', amb:0.50 },
+           moss:['#3f8f73','#62c79a'], crystal:'#b58cff', mush:'#8be0ff', spore:'#b9a6ff', amb:0.37 },
   earth: { bg:['#130f0c','#0e0b09','#080605'], glow:'150,96,52', far:'36,26,18', mid:'26,19,13',
            rock:['#35302b','#302b27','#3b352f'], top:['#56493d','#6a5a49'], under:'#1b1714', sideL:'#433a32', sideR:'#211c18',
-           moss:['#6e7f3a','#9cb04c'], crystal:'#ffb35c', mush:'#ffd27a', spore:'#e8c08a', amb:0.52 },
+           moss:['#6e7f3a','#9cb04c'], crystal:'#ffb35c', mush:'#ffd27a', spore:'#e8c08a', amb:0.39 },
   ember: { bg:['#170b0b','#110809','#090405'], glow:'200,60,30', far:'40,16,14', mid:'28,11,10',
            rock:['#33262a','#2d2125','#3a2b2f'], top:['#58404a','#6c4e57'], under:'#1b1215', sideL:'#45323a', sideR:'#21171a',
-           moss:['#8a3b2a','#c9643a'], crystal:'#ff7a4a', mush:'#ffb25e', spore:'#ff9b6b', amb:0.44 },
+           moss:['#8a3b2a','#c9643a'], crystal:'#ff7a4a', mush:'#ffb25e', spore:'#ff9b6b', amb:0.34 },
   frost: { bg:['#0b1018','#080c13','#05070b'], glow:'60,110,170', far:'16,24,38', mid:'11,17,28',
            rock:['#2a3140','#262c3a','#303849'], top:['#46546b','#5a6c86'], under:'#161b25', sideL:'#36404f', sideR:'#1a1f29',
-           moss:['#3b7f95','#5ec8e0'], crystal:'#8fe3ff', mush:'#c6f4ff', spore:'#a6d8ff', amb:0.50 },
+           moss:['#3b7f95','#5ec8e0'], crystal:'#8fe3ff', mush:'#c6f4ff', spore:'#a6d8ff', amb:0.37 },
   fungal:{ bg:['#0b120e','#08100c','#050906'], glow:'60,150,90', far:'16,32,22', mid:'11,23,16',
            rock:['#29322d','#252d29','#2f3a34'], top:['#435a4c','#56725f'], under:'#151c18', sideL:'#34433a', sideR:'#19201c',
-           moss:['#4c9a3c','#86d65a'], crystal:'#a6ff7a', mush:'#ff8ad8', spore:'#c8ff9a', amb:0.52 },
+           moss:['#4c9a3c','#86d65a'], crystal:'#a6ff7a', mush:'#ff8ad8', spore:'#c8ff9a', amb:0.39 },
   dusk:  { bg:['#120c18','#0d0912','#07050a'], glow:'190,120,200', far:'34,20,40', mid:'24,14,29',
            rock:['#30293a','#2b2534','#372f42'], top:['#54475f','#6a5a77'], under:'#1a1520', sideL:'#40364b', sideR:'#1e1924',
-           moss:['#8a5fb0','#d7a8ff'], crystal:'#ffd36b', mush:'#ff9ecf', spore:'#ffd9a6', amb:0.48 },
+           moss:['#8a5fb0','#d7a8ff'], crystal:'#ffd36b', mush:'#ff9ecf', spore:'#ffd9a6', amb:0.36 },
 };
 let TH = THEMES.violet, themeName = 'violet';
 
@@ -404,7 +425,7 @@ let TH = THEMES.violet, themeName = 'violet';
 const LEVELS = [
   {
     name:'壹 · 缝隙', sub:'削扁自己', theme:'violet',
-    hint:'<b>右键</b>削掉自己身上的格子 —— 削扁了才钻得进墙缝　·　<b>左键</b>贴回去　·　A D 移动 / 空格 跳　·　<b>E</b> 改造面板',
+    hint:'<b>点击身体</b>削掉格子 —— 削扁了才钻得进墙缝　·　<b>点击空位</b>贴回去　·　A D 移动 / 空格 跳　·　<b>E</b> 改造面板',
     hintTouch:'点<b>改</b>(或直接点自己身体)削掉格子 —— 削扁了才钻得进墙缝',
     start:[6,37],
     rects:[
@@ -533,10 +554,436 @@ const LEVELS = [
     ],
     exit:[74,8,3,3], lock:true,
   },
+  {
+    name:'捌 · 草醒森林', sub:'草唤醒植物', theme:'fungal',
+    hint:'先把草贴在身上,靠近灰色蘑菇把它唤醒,踩上就弹!绿色种芽还能长出藤蔓踏板',
+    start:[5,37],
+    rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:19,y:31,w:16,h:1,t:'stone'},
+           {x:38,y:23,w:18,h:1,t:'stone'}, {x:60,y:15,w:19,h:1,t:'stone'}],
+    devices:[{type:'spring',x:11,y:40,w:4,power:560,needs:'grass'}, {type:'spring',x:29,y:31,w:4,power:560,needs:'grass'},
+             {type:'spring',x:51,y:23,w:4,power:560,needs:'grass'}, {type:'checkpoint',x:22,y:31},
+             {type:'checkpoint',x:42,y:23}, {type:'bud',x:25,y:31,target:'forest'},
+             {type:'vine',x:35,y:31,w:4,id:'forest'}],
+    seeds:[[36,28],[40,20],[62,12]], items:[{c:[7,39],m:'grass'},{c:[25,30],m:'grass'}],
+    enemies:[], exit:[74,12,3,3],
+  },
+  {
+    name:'玖 · 石头的开关', sub:'先变重,再搭车', theme:'frost',
+    hint:'先重装开第一道门,收石头搭浮台 · 中层再重装踩亮第二踏板,再轻装登顶;两道门永久锁定',
+    start:[5,37],
+    rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:38,y:28,w:11,h:1,t:'stone'},
+           {x:65,y:19,w:14,h:1,t:'stone'}],
+    devices:[{type:'plate',x:18,y:40,w:5,weight:12.5,target:'a'},
+             {type:'gate',x:28,y:22,w:2,h:18,id:'a'},
+             {type:'lift',x:31,y:40,toX:31,toY:28,w:5,period:7},
+             {type:'lift',x:51,y:28,toX:55,toY:19,w:8,period:7},
+             {type:'checkpoint',x:40,y:28}, {type:'plate',x:42,y:28,w:5,weight:12.5,target:'b'},
+             {type:'gate',x:64,y:1,w:1,h:39,id:'b'}],
+    seeds:[[11,34],[44,24],[59,16]],
+    items:[{c:[9,39],m:'stone'},{c:[12,39],m:'stone'},{c:[15,39],m:'stone'}],
+    enemies:[],exit:[74,16,3,3],
+  },
+  {
+    name:'拾 · 水到火熄', sub:'带水冷却开路', theme:'ember',
+    hint:'水关喷口 → 走上层点亮蓝色共鸣柱 → 再用一格水冷却红门;上层储水补给可取,下层看准火焰节拍',
+    start:[5,37],
+    rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:11,y:36,w:4,h:1,t:'stone'}, {x:17,y:33,w:8,h:1,t:'stone'},
+           {x:30,y:29,w:9,h:1,t:'stone'}, {x:44,y:33,w:9,h:1,t:'stone'}],
+    devices:[{type:'jet',x:23,y:40,w:3,h:6,period:3.8,phase:0,id:'water-jet'},
+             {type:'jet',x:40,y:40,w:3,h:8,period:3.8,phase:1.2},
+             {type:'jet',x:57,y:40,w:3,h:7,period:3.8,phase:2.4},
+             {type:'checkpoint',x:33,y:40}, {type:'checkpoint',x:50,y:40},
+             {type:'valve',x:19,y:40,target:'water-jet'}, {type:'emberwall',x:64,y:22,w:2,h:18},
+             {type:'relay',x:34,y:29,mat:'water',target:'tide'},
+             {type:'gate',x:70,y:1,w:1,h:39,id:'tide'}],
+    seeds:[[21,30],[34,26],[60,30]],
+    items:[{c:[9,39],m:'water'},{c:[12,39],m:'water'},{c:[15,39],m:'water'},
+           {c:[34,28],m:'water'},{c:[35,28],m:'water'},{c:[34,39],m:'water'},{c:[51,39],m:'water'},{c:[61,39],m:'water'},{c:[62,39],m:'water'}],
+    enemies:[{c:[69,37],w:3,h:3,m:'meat',speed:44}],exit:[75,37,3,3],
+  },
+  {
+    name:'拾壹 · 火开荆途', sub:'带火烧出一条路', theme:'dusk',
+    hint:'火烧荆棘开路 → 上层用火点灯、草唤醒种芽,两枚徽记一起开终门 · 藤蔓支路与浮台都能登顶',
+    start:[5,37],
+    rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:16,y:23,w:11,h:15,t:'stone'},
+           {x:39,y:29,w:12,h:1,t:'stone'}, {x:65,y:19,w:14,h:1,t:'stone'}],
+    devices:[{type:'spring',x:32,y:40,w:4,power:500},
+             {type:'lift',x:51,y:29,toX:55,toY:19,w:8,period:7},
+             {type:'checkpoint',x:42,y:29}, {type:'jet',x:59,y:40,w:3,h:6,period:4,phase:0},
+             {type:'bramble',x:29,y:20,w:2,h:20}, {type:'bud',x:45,y:29,target:'garden'},
+             {type:'relay',x:48,y:29,mat:'fire',target:'garden'},
+             {type:'gate',x:64,y:1,w:1,h:39,id:'garden'},
+             {type:'vine',x:53,y:25,w:6,id:'garden'}, {type:'vine',x:60,y:21,w:5,id:'garden'}],
+    seeds:[[22,39],[55,22],[61,16]],
+    items:[{c:[10,39],m:'fire'},{c:[27,39],m:'fire'},{c:[28,39],m:'meat'},{c:[41,28],m:'fire'},{c:[44,28],m:'grass'}],
+    enemies:[],exit:[74,16,3,3],
+  },
+  {
+    name:'拾贰 · 洞穴游乐场', sub:'把学会的,玩出来', theme:'violet',
+    hint:'石压开关 → 水冷却红门 → 火烧荆棘 → 草唤醒顶层蘑菇 · 四种材料,都要贴上身才有用!',
+    start:[5,37],
+    rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:39,y:29,w:12,h:1,t:'stone'},
+           {x:67,y:17,w:12,h:1,t:'stone'}, {x:75,y:9,w:4,h:1,t:'stone'}],
+    devices:[{type:'plate',x:15,y:40,w:5,weight:12.5,target:'final'},
+             {type:'gate',x:23,y:20,w:2,h:20,id:'final'},
+             {type:'emberwall',x:27,y:20,w:1,h:20},
+             {type:'bramble',x:31,y:20,w:1,h:20},
+             {type:'spring',x:36,y:40,w:3,power:510},
+             {type:'checkpoint',x:42,y:29},
+             {type:'lift',x:51,y:29,toX:57,toY:22,w:8,period:6.8},
+             {type:'spring',x:70,y:17,w:4,power:440,needs:'grass'}],
+    seeds:[[18,33],[45,25],[73,8]],
+    items:[{c:[8,39],m:'stone'},{c:[11,39],m:'stone'},{c:[13,39],m:'water'},
+           {c:[26,39],m:'water'},{c:[29,39],m:'fire'},{c:[30,39],m:'fire'},{c:[43,28],m:'grass'}],
+    enemies:[],exit:[76,6,3,3],
+  },
 ];
+// 老关卡保留入门路线,把难度放进可选的高处与绕路收集。
+const EARLY_SEEDS = [
+  [[19,33],[40,37],[65,30]], [[21,30],[35,25],[48,38]], [[16,31],[39,38],[62,31]],
+  [[21,30],[31,24],[41,30]], [[18,34],[48,32],[60,38]], [[20,38],[26,40],[62,31]],
+  [[9,32],[42,20],[74,6]],
+];
+EARLY_SEEDS.forEach((list,i)=>{ LEVELS[i].seeds=list; });
 function levelHint(){
   const L = LEVELS[level]; if (!L) return '';
   return (touchMode && L.hintTouch) ? L.hintTouch : (L.hint || '');
+}
+
+// ═════════════════════════════════════════════ 洞穴机关:触碰即互动,不增加按键
+function loadDevices(L){
+  devices = (L.devices || []).map(d=>Object.assign({},d,{
+    x:d.x*CELL,y:d.y*CELL,w:(d.w||3)*CELL,h:(d.h||1)*CELL,
+    startX:d.x*CELL,startY:d.y*CELL,t:0,cd:0,open:false,lit:false,active:false,warning:false,grown:false,progress:0,quenched:false,
+  }));
+  seeds = (L.seeds || []).map(c=>({x:c[0]*CELL+4,y:c[1]*CELL+4,got:false}));
+}
+function updateDevices(dt){
+  for (const d of devices){
+    d.t += dt; d.cd = Math.max(0,d.cd-dt);
+    if (d.type === 'jet'){
+      const cycle = (d.t+(d.phase||0)) % d.period;
+      d.warning = !d.quenched && cycle >= d.period*0.46 && cycle < d.period*0.62;
+      d.active = !d.quenched && cycle >= d.period*0.62;
+    }
+    if (d.type !== 'lift') continue;
+    const b = bounds(), oldX = d.x, oldY = d.y;
+    const riding = !b.empty && P.vy >= 0 && Math.abs(b.y+b.h-oldY)<1.1 && b.x+b.w>oldX+1 && b.x<oldX+d.w-1;
+    const t = (1-Math.cos(d.t*Math.PI*2/d.period))/2;
+    d.x = lerp(d.startX,d.toX*CELL,t); d.y = lerp(d.startY,d.toY*CELL,t);
+    if (riding){
+      tryMoveX(d.x-oldX); tryMoveY(d.y-oldY);
+      P.onGround = true; P.coyote = 0.1;
+    }
+  }
+}
+function snapshotCheckpoint(index){
+  checkpoint = {index,px:P.px,py:P.py,mask:Array.from(P.mask),bag:Object.assign({},P.bag),sel:P.sel,
+    grid:Array.from(grid),devices:devices.map(d=>Object.assign({},d)),seeds:seeds.map(s=>Object.assign({},s)),
+    items:items.map(i=>Object.assign({},i)),enemies:enemies.map(e=>Object.assign({},e)),exitLocked};
+  toast('复活点已点亮 · 散架后从这里继续');
+  arp([523,784,1046],70); vibrate(20);
+}
+function respawnCheckpoint(){
+  const saved = checkpoint;
+  loadLevel(level,true);
+  if (!saved) return;
+  checkpoint = saved;
+  P.mask.set(saved.mask); P.bag = Object.assign({},saved.bag); P.sel = saved.sel;
+  P.px=saved.px; P.py=saved.py; P.vx=P.vy=0; P.invuln=1.5; jumpBuf=0;
+  grid.set(saved.grid); tilesDirty=true;
+  devices=saved.devices.map(d=>Object.assign({},d)); seeds=saved.seeds.map(s=>Object.assign({},s));
+  items=saved.items.map(i=>Object.assign({},i)); enemies=saved.enemies.map(e=>Object.assign({},e));
+  exitLocked=saved.exitLocked; hist=[];
+  camSnap(); syncBag(); syncUndo();
+  toast('从青旗继续');
+}
+function consumeBodyMaterial(key){
+  const id=MAT[key].id;
+  for(let k=0;k<P.mask.length;k++){
+    if(P.mask[k]===id && connectedWithout(k%MW,(k/MW)|0)){
+      const w=cellWorld(k%MW,(k/MW)|0);
+      P.mask[k]=0;
+      burst(w.x+4,w.y+4,MAT[key].c,8,80,2);
+      return true;
+    }
+  }
+  return false;
+}
+function refreshChannel(target){
+  if(!target)return;
+  const switches=devices.filter(d=>d.target===target&&['plate','bud','relay','valve'].includes(d.type));
+  if(!switches.length||!switches.every(d=>d.lit))return;
+  for(const door of devices)if(door.type==='gate'&&door.id===target)door.open=true;
+}
+function interactMaterial(d,dt,b){
+  const near=rectOverlap({x:b.x-10,y:b.y-10,w:b.w+20,h:b.h+20},d);
+  if(d.type==='spring' && d.needs==='grass' && !d.lit && near && countMat('grass')>0){
+    d.lit=true;
+    burst(d.x+d.w/2,d.y-6,'#b2f284',10,100,2);
+    toast('草唤醒了蘑菇 · 踩上去弹跳'); tone(500,1000,0.1,'triangle',0.05);
+  }
+  if(d.type==='bud' && !d.lit && near && countMat('grass')>0){
+    d.lit=true;
+    for(const vine of devices){
+      if(vine.type==='vine' && vine.id===d.target){
+        vine.grown=true;burst(vine.x+vine.w/2,vine.y,'#a7e77e',14,100,2);
+      }
+    }
+    refreshChannel(d.target);
+    toast('草唤醒种芽 · 藤蔓长成了踏板'); arp([392,523,784],70);
+  }
+  if(d.type==='relay' && !d.lit && near && countMat(d.mat)>0){
+    d.lit=true;refreshChannel(d.target);
+    burst(d.x+d.w/2,d.y-12,MAT[d.mat].c,14,90,2);
+    const remaining=devices.filter(s=>s.target===d.target&&['relay','bud','plate'].includes(s.type)&&!s.lit).length;
+    toast(MAT[d.mat].label+'徽记已亮'+(remaining?' · 还需 '+remaining+' 枚徽记':' · 联动门已开启'));arp([440,660,880],65);
+  }
+  if(d.type==='bramble' && !d.open){
+    if(near && countMat('fire')>0){
+      d.progress=Math.min(1,d.progress+dt/0.75);
+      if(Math.random()<dt*25)ember(d.x+Math.random()*d.w,d.y+d.h*Math.random(),'#ffc25c');
+      if(d.progress>=1){
+        d.open=true;burst(d.x+d.w/2,b.y+b.h/2,'#ffb75d',22,150,2);
+        toast('火烧开了荆棘'); noise(0.15,0.04,700,5000);kick(4,0,0);
+      }
+    } else d.progress=Math.max(0,d.progress-dt*0.5);
+  }
+  if((d.type==='emberwall' && !d.open || d.type==='valve' && !d.lit) && near && countMat('water')>0){
+    d.progress=Math.min(1,d.progress+dt/0.4);
+    if(d.progress>=1 && consumeBodyMaterial('water')){
+      d.open=true;d.lit=true;
+      if(d.type==='valve'){
+        for(const jet of devices)if(jet.type==='jet' && jet.id===d.target){jet.quenched=true;jet.active=false;jet.warning=false;}
+      }
+      burst(d.x+d.w/2,b.y,'#c7f3ff',20,100,2);
+      toast(d.type==='valve'?'用掉一格水 · 喷口关闭':'用掉一格水 · 炽热门冷却打开');
+      refreshChannel(d.target);tone(1100,350,0.14,'sine',0.05);syncBag();
+    }
+  } else if(d.type==='emberwall'||d.type==='valve')d.progress=Math.max(0,d.progress-dt*0.8);
+}
+function interactDevices(dt){
+  if (state !== 'play') return;
+  const b = bounds(); if (b.empty) return;
+  for (const d of devices){
+    const over = b.x+b.w>d.x && b.x<d.x+d.w;
+    interactMaterial(d,dt,b);
+    const onTop = over && Math.abs(b.y+b.h-d.y)<2 && P.vy>=0;
+    if (d.type === 'spring' && (!d.needs || d.lit) && onTop && d.cd<=0){
+      P.vy = -(d.power||490)*clamp(1-(weight()-9)*0.015,0.7,1.12);
+      P.onGround=false; P.coyote=0; jumpBuf=0; P.springFlight=true; d.cd=0.3;
+      squash(0.7,1.3); kick(3,0,-1);
+      burst(b.x+b.w/2,d.y-2,'#ffb2e7',12,110,2);
+      tone(280,1100,0.16,'triangle',0.07); vibrate(15);
+    }
+    if (d.type === 'plate' && !d.lit && onTop && P.onGround){
+      if (weight() >= d.weight){
+        d.lit=true;
+        refreshChannel(d.target);
+        burst(d.x+d.w/2,d.y-3,'#ffe39a',12,100,2);
+        toast('光门开了 · 踏板已锁定,可以收回石头'); arp([330,494,659],65);
+      } else if (d.cd<=0){
+        d.cd=2; floater(d.x+d.w/2,d.y-20,'贴石头 · 重量 ≥ '+d.weight,'#ffe39a');
+      }
+    }
+    if (d.type === 'jet' && d.active && d.cd<=0 && P.invuln<=0 && rectOverlap(b,{x:d.x,y:d.y-d.h,w:d.w,h:d.h})){
+      d.cd=0.75;
+      let water=-1;
+      for (let k=0;k<P.mask.length;k++) if (P.mask[k]===MAT.water.id && connectedWithout(k%MW,(k/MW)|0)){water=k;break;}
+      if (water>=0){
+        P.mask[water]=0; P.invuln=0.65;
+        burst(b.x+b.w/2,b.y+b.h/2,'#bcefff',14,110,2);
+        toast('水挡住了喷火'); tone(1000,400,0.12,'sine',0.05);
+      } else {
+        damagePlayerNear(d.x+d.w/2,b.y+b.h,1);
+        P.kbT=0.14; P.kbV=b.x+b.w/2<d.x+d.w/2?-80:80;
+      }
+    }
+  }
+  for (const s of seeds){
+    if (!s.got && rectOverlap(b,{x:s.x-5,y:s.y-6,w:10,h:12})){
+      s.got=true;
+      const n=seeds.filter(s=>s.got).length;
+      burst(s.x,s.y,'#ffe9a3',18,125,2); tone(660+n*100,1000+n*130,0.12,'triangle',0.06);
+      floater(s.x,s.y-10,'✦ '+n+'/'+seeds.length,'#fff0ae');
+      if (n===seeds.length) toast('光种收齐了!');
+    }
+  }
+  // 收集与战斗结算后再存档,避免复活时复制材料;仅在安全站稳时激活。
+  if (P.onGround && P.invuln<=0){
+    devices.forEach((d,index)=>{
+      if (d.type==='checkpoint' && !d.lit && rectOverlap(bounds(),{x:d.x-6,y:d.y-26,w:20,h:27})){
+        d.lit=true; snapshotCheckpoint(index);
+      }
+    });
+  }
+}
+
+// Icons describe material function even when viewed in grayscale.
+function drawMaterialBadge(mat,x,y,painter=ctx,alpha=1){
+  painter.save();painter.translate(Math.round(x),Math.round(y));painter.globalAlpha=alpha;
+  painter.fillStyle='#292d40';painter.beginPath();painter.moveTo(0,-7);painter.lineTo(7,0);painter.lineTo(0,7);painter.lineTo(-7,0);painter.closePath();painter.fill();
+  painter.strokeStyle='#ad926c';painter.lineWidth=1;painter.stroke();
+  painter.fillStyle=MAT[mat].c;
+  if(mat==='grass'){
+    painter.fillRect(-3,-3,4,3);painter.fillRect(1,-1,3,3);painter.fillRect(0,-1,1,5);
+    painter.fillStyle='#e2f6b6';painter.fillRect(-2,-2,2,1);
+  }else if(mat==='water'){
+    painter.fillRect(0,-4,1,2);painter.fillRect(-1,-2,3,2);painter.fillRect(-3,0,7,3);painter.fillRect(-2,3,5,1);
+    painter.fillStyle='#e3ffff';painter.fillRect(-2,1,1,2);
+  }else if(mat==='fire'){
+    painter.fillRect(0,-4,2,3);painter.fillRect(-2,-1,5,4);painter.fillRect(-3,1,7,2);
+    painter.fillStyle='#fff0ae';painter.fillRect(0,0,2,3);
+  }else if(mat==='stone'){
+    painter.fillRect(-2,-3,4,1);painter.fillRect(-3,-2,7,5);painter.fillStyle='#e0e5dd';painter.fillRect(-2,-2,3,1);
+    painter.fillStyle='#627086';painter.fillRect(1,0,1,3);
+  }else{
+    painter.fillRect(-3,-2,3,3);painter.fillRect(1,-2,3,3);painter.fillRect(-2,1,5,2);painter.fillRect(0,3,1,1);
+  }
+  painter.restore();
+}
+function drawMechanismLinks(){
+  ctx.save();ctx.lineWidth=1;
+  for(const d of devices){
+    if(!d.target||!['plate','bud','relay','valve'].includes(d.type))continue;
+    const door=devices.find(g=>g.id===d.target&&['gate','jet'].includes(g.type));if(!door)continue;
+    ctx.strokeStyle=d.lit?'rgba(225,200,146,0.52)':'rgba(179,158,121,0.23)';
+    ctx.setLineDash(d.lit?[]:[2,3]);
+    ctx.beginPath();ctx.moveTo(d.x+d.w/2,d.y+3);ctx.lineTo(door.x+door.w/2,d.y+3);ctx.lineTo(door.x+door.w/2,door.y+door.h-3);ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawChapterWayfinding(){
+  const chapters={7:['VERDANT ARCHIVE','草木档案'],8:['THE COUNTERWEIGHT','石衡工坊'],9:['TIDAL FURNACE','潮汐熔炉'],10:['EMBER GARDEN','余烬花园'],11:['THE FIVEFOLD GATE','五色之门']};
+  if(!chapters[level])return;
+  const [en,cn]=chapters[level],L=LEVELS[level],x=L.start[0]*8-7,y=L.start[1]*8-38;
+  ctx.save();ctx.fillStyle='rgba(224,198,153,0.34)';ctx.font='5px monospace';ctx.fillText(en,x,y);
+  ctx.fillStyle='rgba(214,206,223,0.54)';ctx.font='7px "PingFang SC",sans-serif';ctx.fillText(cn,x,y+11);
+  for(let i=0;i<3;i++){ctx.fillStyle='#635671';ctx.fillRect(x+i*5,y+18,3,1);}
+  ctx.restore();
+}
+function drawDevices(){
+  ctx.font='6px monospace'; ctx.textAlign='center';
+  drawMechanismLinks();
+  for (const d of devices){
+    if (d.x+d.w<cam.x-50 || d.x>cam.x+VIEW_W+50) continue;
+    const x=Math.round(d.x), y=Math.round(d.y);
+    if (d.type==='spring'){
+      const press=d.cd>0?3:0;
+      const asleep=d.needs && !d.lit;
+      ctx.fillStyle='#54435c';ctx.fillRect(x+5,y-7,d.w-10,7);
+      ctx.fillStyle=asleep?'#514c58':'#a1437d';ctx.fillRect(x,y-9+press,d.w,4);
+      ctx.fillStyle=asleep?'#797280':'#ff9dd5';ctx.fillRect(x+2,y-11+press,d.w-4,3);
+      ctx.fillStyle=asleep?'#6b6473':'#b35993';ctx.fillRect(x+3,y-7+press,d.w-6,2);
+      ctx.fillStyle=asleep?'#b3aaad':'#fbd4e9';ctx.fillRect(x+7,y-5,d.w-14,2);
+      ctx.fillStyle='#674f66';ctx.fillRect(x+8,y-4,2,4);ctx.fillRect(x+d.w-10,y-4,2,4);
+      ctx.fillStyle='#fff0d5';for(let k=5;k<d.w-3;k+=8)ctx.fillRect(x+k,y-9+press,3,2);
+      ctx.fillStyle=asleep?'#a7e77e':'#ffd8ed';ctx.fillText(asleep?'草 → 醒':'↑',x+d.w/2,y-17+Math.sin(time*3)*2);
+    }
+    if(d.type==='vine'){
+      ctx.strokeStyle=d.grown?'#72bc62':'rgba(92,133,86,0.22)';ctx.lineWidth=d.grown?3:1;
+      ctx.beginPath();ctx.moveTo(x,y+4);ctx.lineTo(x+d.w,y+4);ctx.stroke();
+      if(d.grown){
+        ctx.fillStyle='#95dc70';ctx.fillRect(x,y,d.w,3);
+        for(let k=3;k<d.w;k+=8){ctx.fillRect(x+k,y+4,3,4);ctx.fillRect(x+k-2,y+5,3,2);}
+      }
+    }
+    if(d.type==='bud'){
+      ctx.fillStyle='#5e8060';ctx.fillRect(x+d.w/2-1,y-8,2,8);
+      ctx.fillStyle=d.lit?'#b8ff8d':'#69955d';ctx.fillRect(x+d.w/2-7,y-10,7,4);ctx.fillRect(x+d.w/2+1,y-13,7,4);
+      ctx.fillStyle='#b5f095';ctx.fillText(d.lit?'藤蔓已长成':'草 → 生长',x+d.w/2,y-20);
+    }
+    if(d.type==='bramble' && !d.open){
+      ctx.fillStyle='rgba(73,68,37,0.45)';ctx.fillRect(x,y,d.w,d.h);
+      ctx.strokeStyle=d.progress>0?'#ef9b53':'#9a9a58';ctx.lineWidth=2;
+      for(let k=4;k<d.h;k+=11){
+        ctx.beginPath();ctx.moveTo(x,y+k);ctx.lineTo(x+d.w,y+k+6);ctx.moveTo(x+d.w,y+k-3);ctx.lineTo(x,y+k+4);ctx.stroke();
+        ctx.fillStyle='#b4a268';ctx.fillRect(x+d.w/2,y+k-3,2,4);
+      }
+      const labelY=clamp(y+d.h/2,cam.y+25,cam.y+VIEW_H-25);
+      ctx.fillStyle='#ffc684';ctx.fillText('火 → 烧开',x+d.w/2,labelY);
+      ctx.fillStyle='#ffb963';ctx.fillRect(x,labelY+4,d.w*d.progress,2);
+    }
+    if(d.type==='emberwall'){
+      ctx.fillStyle=d.open?'#426c80':'#853e36';ctx.fillRect(x-1,y,d.w+2,3);
+      if(!d.open){
+        ctx.fillStyle='#542e31';ctx.fillRect(x,y,d.w,d.h);
+        for(let k=5;k<d.h;k+=9){ctx.fillStyle='#fa8751';ctx.fillRect(x+2,y+k,d.w-4,2);}
+        const labelY=clamp(y+d.h/2,cam.y+25,cam.y+VIEW_H-25);
+        ctx.fillStyle='#a8e9ff';ctx.fillText('水 → 冷却',x+d.w/2,labelY);
+        ctx.fillRect(x,labelY+4,d.w*d.progress,2);
+      }
+    }
+    if(d.type==='valve'){
+      ctx.fillStyle='#5a839c';ctx.fillRect(x+3,y-8,d.w-6,8);
+      ctx.strokeStyle=d.lit?'#b5f5f4':'#81caff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x+d.w/2,y-13,5,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle='#b3eaff';ctx.fillText(d.lit?'已关闭':'水 → 关火',x+d.w/2,y-24);
+    }
+    if (d.type==='lift'){
+      ctx.strokeStyle='rgba(125,222,255,0.25)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(d.startX+d.w/2,d.startY+4);ctx.lineTo(d.toX*CELL+d.w/2,d.toY*CELL+4);ctx.stroke();
+      ctx.fillStyle='#253f5b';ctx.fillRect(x,y,d.w,7);
+      ctx.fillStyle='#8bdcf5';ctx.fillRect(x,y,d.w,2);
+      ctx.fillStyle='#4d7890';for(let k=3;k<d.w;k+=8)ctx.fillRect(x+k,y+4,4,2);
+      for(const side of [1,d.w-7]){
+        ctx.fillStyle='#ba9870';ctx.fillRect(x+side,y+1,6,5);ctx.fillStyle='#e6d6a5';ctx.fillRect(x+side+2,y+2,2,2);
+      }
+      ctx.fillStyle='#2a3549';ctx.fillRect(x+7,y+7,d.w-14,3);
+      ctx.fillStyle='#83d3d9';ctx.fillRect(x+d.w/2-3,y+7,6,1);
+    }
+    if (d.type==='plate'){
+      ctx.fillStyle=d.lit?'#fff3ae':'#99763d';ctx.fillRect(x,y-(d.lit?1:3),d.w,3);
+      ctx.fillStyle=d.lit?'#93ffd0':'#ffe39a';ctx.fillText(d.lit?'✓':'◆ '+d.weight,x+d.w/2,y-10);
+    }
+    if(d.type==='relay'){
+      const c=MAT[d.mat].c;
+      ctx.fillStyle='#383646';ctx.fillRect(x+4,y-20,d.w-8,20);
+      ctx.fillStyle='#827966';ctx.fillRect(x+2,y-2,d.w-4,2);
+      ctx.fillStyle=d.lit?c:'#665769';ctx.fillRect(x+6,y-23,d.w-12,3);
+      drawMaterialBadge(d.mat,x+d.w/2,y-12,ctx,d.lit?1:0.6);
+      ctx.fillStyle=d.lit?'#ead9b0':c;ctx.fillText(d.lit?'已共鸣':MAT[d.mat].label+' → 共鸣',x+d.w/2,y-30);
+    }
+    if (d.type==='gate'){
+      const switches=devices.filter(s=>s.target===d.id&&['plate','relay','bud'].includes(s.type));
+      switches.forEach((sw,i)=>{const yy=clamp(y+12+i*10,cam.y+26+i*10,cam.y+VIEW_H-18);ctx.fillStyle=sw.lit?'#b9ecc3':'#75644f';ctx.fillRect(x+d.w+3,yy,4,4);});
+      ctx.fillStyle='#725a3d';ctx.fillRect(x-2,y,2,d.h);ctx.fillRect(x+d.w,y,2,d.h);
+      ctx.fillRect(x-2,y,d.w+4,3);
+      if (!d.open){
+        ctx.fillStyle='rgba(255,203,111,0.2)';ctx.fillRect(x,y,d.w,d.h);
+        ctx.fillStyle='#e6b56a';for(let k=3;k<d.w;k+=5)ctx.fillRect(x+k,y,1,d.h);
+      } else { ctx.fillStyle='#8fffca';ctx.fillRect(x,y,d.w,2); }
+    }
+    if (d.type==='jet'){
+      ctx.fillStyle='#5a3940';ctx.fillRect(x,y-3,d.w,3);
+      ctx.fillStyle=d.active?'#fff0ac':d.warning?'#ffb756':'#5b6d77';
+      for(let k=2;k<d.w;k+=5)ctx.fillRect(x+k,y-2,2,2);
+      if (d.warning){ctx.fillStyle='#ffbf75';ctx.fillText('!',x+d.w/2,y-12);}
+      if (d.active){
+        ctx.fillStyle='rgba(255,104,35,0.38)';ctx.fillRect(x,y-d.h,d.w,d.h);
+        for(let k=2;k<d.w;k+=5){
+          const h=d.h*(0.74+0.2*Math.sin(time*28+k));
+          ctx.fillStyle='#ff9c45';ctx.fillRect(x+k,y-h,3,h);
+          ctx.fillStyle='#ffe8a0';ctx.fillRect(x+k+1,y-h*0.6,1,h*0.6);
+        }
+      }
+    }
+    if (d.type==='checkpoint'){
+      ctx.fillStyle='#5c6d76';ctx.fillRect(x,y-25,2,25);
+      ctx.fillStyle=d.lit?'#a5ffe1':'#3c847a';ctx.fillRect(x+2,y-25,12,9);
+      ctx.fillStyle=d.lit?'#e3fff1':'#82baab';ctx.fillRect(x+4,y-23,2,5);
+      ctx.fillStyle='#463d4f';ctx.fillRect(x-3,y-2,8,3);
+      ctx.fillStyle='#d1b080';ctx.fillRect(x-2,y-28,6,3);
+      ctx.fillStyle=d.lit?'#d9ffdf':'#719a8a';ctx.fillRect(x,y-32,2,4);
+    }
+  }
+  for (const s of seeds){
+    if (s.got) continue;
+    const y=s.y+Math.sin(time*3+s.x)*2;
+    ctx.fillStyle='rgba(255,217,111,0.14)';ctx.fillRect(s.x-7,y-7,14,14);
+    ctx.fillStyle='#ffde83';ctx.beginPath();ctx.moveTo(s.x,y-5);ctx.lineTo(s.x+4,y);ctx.lineTo(s.x,y+5);ctx.lineTo(s.x-4,y);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#fff8d2';ctx.fillRect(s.x-1,y-2,2,3);
+  }
+  ctx.textAlign='left';
 }
 
 // ═════════════════════════════════════════════ 玩家
@@ -550,8 +997,8 @@ const P = {
   sel:'stone',
   invuln:0, denyT:0, flash:0, shake:0,
   eyeT:0, blink:0,
-  regenT:0, burnT:0, evapT:0, lavaT:0, crumbleT:0,
-  bornT:0,
+  burnT:0, evapT:0, lavaT:0, crumbleT:0,
+  bornT:0, springFlight:false,
   sx:1, sy:1, svx:0, svy:0,           // 挤压拉伸(弹簧)
   dustT:0, airT:0, lastVy:0, beatT:0, hurtFace:0,
   kbT:0, kbV:0,                       // 击退:短时间内覆盖输入
@@ -585,8 +1032,8 @@ function spawnPlayer(sx,sy){
   P.px = sx*CELL - 2*CELL;
   P.py = sy*CELL - 2*CELL;
   P.vx = P.vy = 0; P.onGround = false; P.coyote = 0; P.face = 1;
-  P.invuln = 0; P.denyT = 0; P.flash = 0; P.crumbleT = 0; P.bornT = 0.5;
-  P.regenT = 0; P.burnT = 0; P.evapT = 0; P.lavaT = 0; P.shake = 0;
+  P.invuln = 0; P.denyT = 0; P.flash = 0; P.crumbleT = 0; P.bornT = 0.5; P.springFlight=false;
+  P.burnT = 0; P.evapT = 0; P.lavaT = 0; P.shake = 0;
   P.sx = P.sy = 1; P.svx = P.svy = 0; P.airT = 0; P.hurtFace = 0; P.kbT = 0; P.kbV = 0;
 }
 function squash(sx, sy){ P.sx = sx; P.sy = sy; }
@@ -616,12 +1063,15 @@ function tryMoveY(dist){
   let x = b.x, y = b.y, w = b.w, h = b.h;
   const steps = Math.max(1, Math.ceil(Math.abs(dist)));
   const st = dist/steps;
-  let blocked = false;
+  let blocked = false, landedLift = false;
   for (let s=0;s<steps;s++){
+    const lift = st > 0 && devices.find(d=>(d.type === 'lift' || (d.type === 'vine' && d.grown)) && x+w>d.x+0.1 && x<d.x+d.w-0.1 &&
+      y+h<=d.y+0.01 && y+h+st>=d.y);
+    if (lift){ y = lift.y-h; blocked = true; landedLift = true; break; }
     if (boxSolid(x, y+st, w, h)) { blocked = true; break; }
     y += st;
   }
-  if (blocked){
+  if (blocked && !landedLift){
     const edge = st > 0 ? (y + h) : y;
     const snap = (st > 0 ? Math.ceil(edge/CELL) : Math.floor(edge/CELL)) * CELL;
     const d = snap - edge;
@@ -645,7 +1095,7 @@ function canPlace(i,j){
   if (!adj) return false;
   P.mask[j*MW+i] = 1;
   const b = bounds();
-  const ok = !boxSolid(b.x, b.y, b.w, b.h);
+  const ok = !boxSolid(b.x, b.y, b.w, b.h) && !devices.some(d=>(d.type==='lift'||(d.type==='vine'&&d.grown)) && rectOverlap(b,d));
   P.mask[j*MW+i] = 0;
   return ok;
 }
@@ -736,6 +1186,8 @@ function loadLevel(idx, retry){
   level = clamp(idx, 0, LEVELS.length-1);
   const L = LEVELS[level];
   themeName = L.theme || 'violet'; TH = THEMES[themeName];
+  checkpoint = null;
+  loadDevices(L);
   grid.fill(0);
   for (let x=1;x<GW-1;x++){ setT(x,0,TILE.STONE); setT(x,GH-1,TILE.STONE); }
   for (let y=1;y<GH-1;y++){ setT(0,y,TILE.STONE); setT(GW-1,y,TILE.STONE); }
@@ -777,6 +1229,9 @@ function loadLevel(idx, retry){
 }
 
 function nextLevel(){
+  const bestSeeds = store.get('seeds', {});
+  bestSeeds[level] = Math.max(bestSeeds[level] || 0, seeds.filter(s=>s.got).length);
+  store.set('seeds', bestSeeds);
   if (level+1 >= LEVELS.length){
     state = 'win';
     document.body.classList.add('menu');
@@ -809,6 +1264,7 @@ function makeChips(container, store_){
   for (const k of ORDER){
     const el = document.createElement('div');
     el.className = 'chip';
+    el.title = MAT_HELP[k];
     const sw = document.createElement('i'); sw.style.background = MAT[k].c; sw.style.color = MAT[k].c;
     const lb = document.createElement('small'); lb.textContent = MAT[k].label;
     const ct = document.createElement('b'); ct.textContent = '0';
@@ -828,6 +1284,7 @@ function ensureSel(prefer){
 }
 let lastBag = {};
 function syncBag(){
+  $('edMatHint').textContent = MAT_HELP[P.sel];
   for (const k of ORDER){
     for (const set of [chips, edChips]){
       const el = set[k];
@@ -853,7 +1310,7 @@ function syncUndo(){
   if (b2) b2.disabled = !has;
 }
 function undo(){
-  if (state !== 'play') return;
+  if (state !== 'play' || menuOpen) return;
   while (hist.length){
     const op = hist.pop(), k = op.j*MW + op.i, m = MAT[op.m];
     let ok = false;
@@ -924,9 +1381,9 @@ const edEl = $('editor'), edCv = $('edCv'), edx = edCv.getContext('2d');
 edx.imageSmoothingEnabled = false;
 const ED = 32; // 每格 32px
 function openEditor(){
-  if (state !== 'play' || editing) return;
+  if (state !== 'play' || editing || menuOpen) return;
   editing = true; edEl.classList.remove('hide');
-  releaseJump(); touchDir = 0; endMove();
+  clearInput();
   tone(500,700,0.06,'triangle',0.04);
 }
 function closeEditor(silent){
@@ -1008,7 +1465,7 @@ function openMenu(){
   if (state !== 'play' || menuOpen) return;
   closeEditor(true);
   menuOpen = true; menuEl.classList.remove('hide');
-  releaseJump(); touchDir = 0; endMove();
+  clearInput();
   $('pmLevel').textContent = LEVELS[level].name;
   $('pmSound').textContent = muted ? '声音:关' : '声音:开';
   const grid = $('pmLevels'); grid.textContent = '';
@@ -1016,8 +1473,10 @@ function openMenu(){
   LEVELS.forEach((L, i)=>{
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'lvb' + (i === level ? ' cur' : '');
+    const stars = (store.get('seeds', {})[i] || 0);
     b.textContent = L.name.split(' · ')[0];
-    b.title = L.name;
+    if (stars){ const badge=document.createElement('small'); badge.textContent='✦'.repeat(stars); b.appendChild(badge); }
+    b.title = L.name + ' · 最佳光种 ' + stars + '/3';
     b.disabled = i > un;
     b.addEventListener('click', ()=>{ closeMenu(true); loadLevel(i); });
     grid.appendChild(b);
@@ -1054,7 +1513,7 @@ function tutStep(){
   const cx = (b.x + b.w/2)/CELL;
   if (cx < 17 && tutCuts === 0) return {text: touchMode ? '按住左下的圆盘往右滑' : '按 D 往右走', arrow:true};
   if (cx < 31){
-    if (b.h > 16) return {text: tutCuts ? '继续削,矮到两格就钻得过去' : (touchMode ? '点一下自己的身体,削掉一格' : '右键点自己的身体,削掉一格'), target: pickCut()};
+    if (b.h > 16) return {text: tutCuts ? '继续削,矮到两格就钻得过去' : '点一下自己的身体,削掉一格', target: pickCut()};
     return {text:'钻过去!', arrow:true};
   }
   if (cx > 38 && cx < 47.5 && b.h > 8) return {text:'这道缝只有一格高 —— 削成一片', target: pickCut()};
@@ -1109,7 +1568,7 @@ function damagePlayerNear(x,y,count){
     for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
       const id = P.mask[j*MW+i];
       if (!id) continue;
-      if (!connectedWithout(i,j)) continue;
+      if (b0.n > 1 && !connectedWithout(i,j)) continue;
       const w = cellWorld(i,j);
       const d = (w.x+4-x)**2 + (w.y+4-y)**2;
       if (d < bestD){ bestD = d; best = j*MW+i; }
@@ -1234,7 +1693,8 @@ function updatePlayer(dt){
     squash(0.78, 1.22);
     tone(250, 480, 0.09, 'square', 0.045);
   }
-  if (P.vy < 0 && !jumpHeld()) P.vy += GRAV*dt*0.55;
+  if (P.vy>=0) P.springFlight=false;
+  if (P.vy < 0 && !jumpHeld() && !P.springFlight) P.vy += GRAV*dt*0.55;
 
   // 脆地板
   if (P.onGround){
@@ -1295,40 +1755,16 @@ function updatePlayer(dt){
           tone(900, 400, 0.12, 'sine', 0.04);
           noise(0.2, 0.04, 2000, 8000);
           if (countMat('water') <= 1) toast('水快烧完了');
+        } else {
+          // 不可削出的水(连接身体的核心或最后一格)不能提供无限岩浆保护。
+          damagePlayerNear(b0.x+b0.w/2,b0.y+b0.h);
+          toast('把水贴在身体边缘,才能消耗它挡住岩浆');
         }
       } else {
         damagePlayerNear(b0.x+b0.w/2, b0.y+b0.h);
       }
     }
   } else P.lavaT = 0;
-
-  // 草再生
-  if (countMat('grass') > 0 && bounds().n < 22){
-    P.regenT += dt;
-    if (P.regenT > 3.2){
-      P.regenT = 0;
-      const cands = [];
-      for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
-        if (P.mask[j*MW+i]) continue;
-        const nb = [[1,0],[-1,0],[0,1],[0,-1]];
-        for (const [dx,dy] of nb){
-          const ni=i+dx,nj=j+dy;
-          if (ni<0||nj<0||ni>=MW||nj>=MH) continue;
-          if (P.mask[nj*MW+ni] === MAT.grass.id){ cands.push([i,j]); break; }
-        }
-      }
-      if (cands.length){
-        const c = cands[(Math.random()*cands.length)|0];
-        if (canPlace(c[0],c[1])){
-          P.mask[c[1]*MW+c[0]] = MAT.grass.id;
-          P.pop[c[1]*MW+c[0]] = 1;
-          const w = cellWorld(c[0],c[1]);
-          burst(w.x+4,w.y+4,'#8be05c',4,50,1);
-          tone(900,1300,0.05,'triangle',0.025);
-        }
-      }
-    }
-  }
 
   // 火烧自己
   if (countMat('fire') > 0){
@@ -1608,7 +2044,7 @@ function update(dt){
   if (state === 'dead'){
     timer += dt;
     updateParticles(dt);
-    if (timer > 1.1) loadLevel(level, true);
+    if (timer > 1.1) respawnCheckpoint();
     return;
   }
   if (state === 'clear'){
@@ -1619,10 +2055,13 @@ function update(dt){
   if (state !== 'play') return;
   levelT += dt;
 
+  updateDevices(dt);
   updatePlayer(dt);
   if (level === 0 && !tutDone && bounds().x/CELL > 52){ tutDone = true; store.set('tutDone', true); }
   updateEnemies(dt);
   updateItems(dt);
+  interactDevices(dt);
+  if (state !== 'play') return;
   updateParticles(dt);
   camFollow(dt);
 
@@ -1711,7 +2150,7 @@ function buildFar(rnd){
       fx.beginPath(); fx.arc(x + w + span/2, top + 10, span/2, Math.PI, 0); fx.stroke();
     }
   }
-  fx.fillStyle = 'rgba(5,4,9,0.45)'; fx.fillRect(0,0,VW,VH);
+  fx.fillStyle = 'rgba(5,4,9,0.24)'; fx.fillRect(0,0,VW,VH);
   for (let i=0;i<140;i++){
     const a = 0.03 + rnd()*0.10;
     fx.fillStyle = 'rgba(255,255,255,'+a.toFixed(2)+')';
@@ -1737,6 +2176,7 @@ function buildMid(rnd){
     mx.fillStyle = 'rgba('+TH.mid+',0.92)';
     mx.beginPath(); mx.moveTo(x-w/2, 20); mx.lineTo(x+w/2, 20); mx.lineTo(x + (rnd()-0.5)*4, 20+len); mx.closePath(); mx.fill();
   }
+  buildSanctuary(mx,level);
   // 地面方向的远景石丘
   mx.beginPath(); mx.moveTo(0,VH);
   for (let x=0;x<=VW;x+=4){ mx.lineTo(x, VH - 40 - Math.sin(x*0.013+rnd()*0.01)*22 - Math.sin(x*0.037)*9); }
@@ -1750,6 +2190,28 @@ function buildMid(rnd){
     for (let y=0;y<len;y+=2) mx.fillRect(Math.floor(x+Math.sin(y*0.08+i)*wob), Math.floor(y0+y), 1, 2);
     if (rnd()>0.6){ mx.fillStyle = 'rgba('+TH.glow+',0.45)'; mx.fillRect(x, Math.floor(y0+len), 2, 2); }
   }
+}
+function buildSanctuary(painter,chapter){
+  painter.save();
+  const cx=240+(chapter%3)*60, y=155-(chapter%4)*17;
+  painter.strokeStyle='rgba('+TH.glow+',0.20)';painter.lineWidth=3;
+  painter.beginPath();painter.arc(cx,y,58,Math.PI,Math.PI*2);painter.stroke();
+  painter.fillStyle='rgba('+TH.glow+',0.08)';painter.fillRect(cx-56,y,112,140);
+  for(const side of [-1,1]){
+    const x=cx+side*58-5;
+    painter.fillStyle='rgba('+TH.glow+',0.13)';painter.fillRect(x,y-4,10,130);painter.fillRect(x-4,y-8,18,5);
+    for(let j=0;j<5;j++){painter.fillStyle='rgba(190,184,203,0.09)';painter.fillRect(x+2,y+10+j*21,3,7);}
+  }
+  painter.strokeStyle='rgba(220,190,137,0.18)';painter.lineWidth=1;
+  painter.beginPath();painter.arc(cx,y-1,35,0,Math.PI*2);painter.stroke();
+  for(let n=0;n<8;n++){
+    const a=n*Math.PI/4,x=cx+Math.cos(a)*35,yy=y+Math.sin(a)*35;
+    painter.fillStyle='rgba(229,201,154,0.25)';painter.fillRect(Math.round(x)-1,Math.round(yy)-2,2,4);
+  }
+  // Five material marks on the ruined observatory wheel.
+  const cs=['#d1909b','#8cae78','#b7b6b9','#7fb7c9','#d5a369'];
+  cs.forEach((c,i)=>{painter.globalAlpha=0.24;painter.fillStyle=c;painter.fillRect(cx-20+i*9,y-2,5,5);});
+  painter.restore();
 }
 function buildNear(rnd){
   nx.clearRect(0,0,VW,VH);
@@ -1894,11 +2356,16 @@ function drawExit(){
   const x = ex*CELL, y = ey*CELL, w = ew*CELL, h = eh*CELL;
   ctx.fillStyle = exitLocked ? '#211d2c' : '#191428';
   ctx.fillRect(x+3, y+4, w-6, h-4);
+  ctx.fillStyle='#363347';ctx.fillRect(x-3,y+h-2,w+6,4);
+  ctx.fillStyle='#7b6885';ctx.fillRect(x-1,y+h-2,w+2,1);
+  ctx.strokeStyle=exitLocked?'#514457':'rgba(229,196,143,0.45)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(x+w/2,y+h/2,w*0.7,0,Math.PI*2);ctx.stroke();
   // 拱门
   ctx.fillStyle = exitLocked ? '#3c3550' : '#8e74c8';
   ctx.fillRect(x+2, y+2, w-4, 2);
   ctx.fillRect(x+2, y+2, 2, h-2);
   ctx.fillRect(x+w-4, y+2, 2, h-2);
+  for(const side of [0,w-3]){ctx.fillStyle='#c4a57f';ctx.fillRect(x+side,y+5,3,3);ctx.fillRect(x+side,y+h-7,3,3);}
   ctx.fillStyle = exitLocked ? '#4c4463' : '#c3b0ff';
   ctx.fillRect(x+w/2-1, y, 2, 2);
   if (!exitLocked){
@@ -1962,29 +2429,83 @@ function drawBlob(cells, w, h, x0, y0, edge, outline, alpha){
 }
 
 // 每种材质一层细节纹理
-function cellTexture(id, x, y, i, j, topOpen){
-  const t = time;
-  if (id === 2){ // 草:顶上冒草尖
-    if (topOpen){
-      ctx.fillStyle = MAT.grass.c;
-      const sw = Math.round(Math.sin(t*3 + i)*0.6);
-      ctx.fillRect(x+1, y-1, 1, 1); ctx.fillRect(x+4+sw, y-2, 1, 2); ctx.fillRect(x+6, y-1, 1, 1);
-    }
-    ctx.fillStyle = '#a8f07a'; ctx.fillRect(x+2+((i*3+j)%4), y+3, 1, 1);
-  } else if (id === 3){ // 石:斑点
-    ctx.fillStyle = '#7d8294'; ctx.fillRect(x+1+((i*5+j*3)%5), y+2+((i+j*7)%3), 2, 1); ctx.fillRect(x+5-((i+j)%3), y+5, 1, 1);
-    ctx.fillStyle = '#c9cdd9'; ctx.fillRect(x+1, y+1, 1, 1);
-  } else if (id === 4){ // 水:流动的高光
-    const o = Math.floor((t*10 + i*3 + j*5) % 10);
-    ctx.fillStyle = '#b8ecff'; if (o < 7) ctx.fillRect(x+o, y+2, 2, 1);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'; if (o > 3) ctx.fillRect(x+o-3, y+4, 1, 1);
-  } else if (id === 5){ // 火:闪烁
-    const f = Math.sin(t*18 + i*2.3 + j*1.7);
-    ctx.fillStyle = f > 0 ? '#ffd35a' : '#ff8a2a'; ctx.fillRect(x+1, y+1, CELL-2, 3);
-    if (topOpen){ ctx.fillStyle = '#ffe9a0'; ctx.fillRect(x+2+((t*20+i)|0)%4, y-1-(f>0.5?1:0), 1, 1); }
-  } else { // 肉
-    ctx.fillStyle = '#ffc2cd'; ctx.fillRect(x+2, y+2, 2, 1);
+function cellTexture(id,x,y,i,j,topOpen){
+  const h=hash(i+11,j+7), t=time;
+  if(id===2){
+    ctx.fillStyle='#4f8e4b';ctx.fillRect(x+3,y+2,1,4);
+    ctx.fillStyle='#c7ef8f';ctx.fillRect(x+1,y+2,3,2);ctx.fillRect(x+4,y+4,2,2);
+    ctx.fillStyle='#7ac97b';ctx.fillRect(x+2,y+5,1,1);
+    if(topOpen){const w=Math.round(Math.sin(t*2.5+i));ctx.fillStyle='#c4ef9b';ctx.fillRect(x+3,y-2,1,3);ctx.fillRect(x+1+w,y-3,3,1);ctx.fillRect(x+4+w,y-4,2,2);}
+  } else if(id===3){
+    ctx.fillStyle='#4f596e';ctx.fillRect(x+2,y+2,1,3);ctx.fillRect(x+3,y+4,3,1);
+    ctx.fillStyle='#c9d8e4';ctx.fillRect(x+1,y+1,4,1);ctx.fillRect(x+5,y+2,1,1);
+    ctx.fillStyle='#7bdbcf';if(h>0.35)ctx.fillRect(x+3,y+3,1,1);
+  } else if(id===4){
+    const wave=Math.round(Math.sin(t*3+i)*1);
+    ctx.fillStyle='#c4f9ff';ctx.fillRect(x+1,y+2+wave,3,1);ctx.fillRect(x+4,y+3+wave,2,1);
+    ctx.fillStyle='#287eaf';ctx.fillRect(x+2,y+5,3,1);
+    ctx.fillStyle='#e4ffff';ctx.fillRect(x+5,y+1+((j+i)%3),1,1);
+  } else if(id===5){
+    const f=Math.sin(t*13+i*2+j);
+    ctx.fillStyle='#c65a28';ctx.fillRect(x+1,y+4,6,3);
+    ctx.fillStyle='#ffdb75';ctx.fillRect(x+2,y+2,4,3);
+    ctx.fillStyle='#fff0bc';ctx.fillRect(x+3,y+(f>0?0:1),2,4);
+    if(topOpen){ctx.fillStyle='#ffb65e';ctx.fillRect(x+2,y-2-(f>0?1:0),1,3);ctx.fillRect(x+5,y-1,1,2);}
+  } else {
+    ctx.fillStyle='#ffc5ce';ctx.fillRect(x+1,y+1,4,1);ctx.fillRect(x+2,y+2,1,1);
+    ctx.fillStyle='#c36a87';if((i+j)%3===0){ctx.fillRect(x+4,y+5,2,1);ctx.fillRect(x+5,y+4,1,1);}
+    ctx.fillStyle='rgba(255,236,217,0.45)';ctx.fillRect(x+1,y+4,1,1);
   }
+}
+
+// The goggles and lantern are attached to existing body cells; they never alter collision.
+function drawExplorerFace(b,cellOf){
+  let best=[],run=[];
+  for(let i=b.i0;i<=b.i1+1;i++){
+    if(i<=b.i1&&cellOf(i,b.j0))run.push(i);
+    else{if(run.length>best.length)best=run;run=[];}
+  }
+  if(!best.length)return;
+  const left=P.px+best[0]*CELL,width=best.length*CELL;
+  const cx=Math.round(left+width/2), y=Math.round(P.py+b.j0*CELL+3);
+  const wide=width>=16, eyeGap=wide?4:2, eyeW=wide?4:2;
+  const move=Math.sign(P.vx)||P.face;
+  ctx.fillStyle='#493b42';ctx.fillRect(left,y,Math.min(width,eyeGap*2+eyeW+4),2);
+  for(const sign of [-1,1]){
+    const x=cx+sign*eyeGap-eyeW/2;
+    ctx.fillStyle='#634749';ctx.fillRect(x-1,y-1,eyeW+2,5);
+    ctx.fillStyle='#e4be83';ctx.fillRect(x-1,y-1,eyeW+2,1);ctx.fillRect(x-1,y+3,eyeW+2,1);
+    ctx.fillRect(x-1,y,1,3);ctx.fillRect(x+eyeW,y,1,3);
+    ctx.fillStyle=P.hurtFace>0?'#cf8f9e':'#b8e8e7';ctx.fillRect(x,y,eyeW,3);
+    ctx.fillStyle='#273c50';
+    if(P.blink>0)ctx.fillRect(x,y+1,eyeW,1);
+    else if(P.hurtFace>0){ctx.fillRect(x+(sign<0?0:1),y,1,1);ctx.fillRect(x+(sign<0?1:0),y+1,1,1);}
+    else ctx.fillRect(x+(move>0?eyeW-1:0),y+1,1,2);
+    ctx.fillStyle='#f4ffed';ctx.fillRect(x,y,1,1);
+  }
+  ctx.fillStyle='#e8c994';ctx.fillRect(cx-1,y+1,2,1);
+  // A little scarf knot, shown only where the body continues below the face.
+  const mid=best[Math.floor(best.length/2)];
+  if(cellOf(mid,b.j0+1)){
+    const sy=Math.round(P.py+(b.j0+1)*CELL+1);
+    ctx.fillStyle='#633e57';ctx.fillRect(cx-4,sy-1,8,3);
+    ctx.fillStyle='#f1cc9b';ctx.fillRect(cx-3,sy,6,1);ctx.fillRect(cx+2,sy+1,2,3);
+  }
+  if(b.n>=7){
+    let chosen=-1,distance=1e9;
+    for(let j=b.j0+1;j<=b.j1;j++)for(let i=b.i0;i<=b.i1;i++)if(cellOf(i,j)){
+      const d=Math.abs(i-(b.i0+b.i1)/2)+Math.abs(j-b.j1)*0.5;
+      if(d<distance){distance=d;chosen=j*MW+i;}
+    }
+    if(chosen>=0){
+      const x=Math.round(P.px+(chosen%MW)*CELL+2),yy=Math.round(P.py+Math.floor(chosen/MW)*CELL+2);
+      ctx.fillStyle='#463c49';ctx.fillRect(x-1,yy-1,6,6);
+      ctx.fillStyle='#b99268';ctx.fillRect(x,yy,4,4);
+      ctx.fillStyle='#f8d994';ctx.fillRect(x+1,yy,2,3);
+      ctx.fillStyle='#fff4c6';ctx.fillRect(x+1,yy,1,1);
+    }
+  }
+  if(b.n<=2){ctx.fillStyle='#b1f4f6';ctx.fillRect(Math.round(left+width),y-2,1,2);}
 }
 
 function drawPlayer(){
@@ -2018,6 +2539,8 @@ function drawPlayer(){
     ctx.fillStyle = white ? '#ffffff' : m.c; ctx.fillRect(x,y,s,s);
     if (!white){
       ctx.fillStyle = m.c2; ctx.fillRect(x, y+s-2, s, 2);
+      ctx.fillStyle='rgba(25,18,38,0.22)'; ctx.fillRect(x+s-1,y+1,1,s-2);
+      ctx.fillStyle='rgba(255,245,220,0.16)'; ctx.fillRect(x+1,y+1,1,s-3);
       const topOpen = !cellOf(i,j-1);
       if (topOpen){ ctx.fillStyle = 'rgba(255,255,255,0.24)'; ctx.fillRect(x+1,y,s-2,1); }
       cellTexture(id, x, y, i, j, topOpen);
@@ -2035,40 +2558,7 @@ function drawPlayer(){
     if (!cellOf(i+1,j)) ctx.fillRect(x+CELL-1,y-1,2,CELL+2);
   }
 
-  // 脸
-  const jTop = b.j0;
-  const eyeXs = [];
-  for (let i=b.i0;i<=b.i1;i++) if (cellOf(i,jTop)) eyeXs.push(i);
-  if (eyeXs.length && !born){
-    const mid = eyeXs[Math.floor(eyeXs.length/2)];
-    let lx = (eyeXs.length > 1 ? eyeXs[Math.floor((eyeXs.length-1)/2)] : mid);
-    let rx = (eyeXs.length > 1 ? eyeXs[Math.ceil((eyeXs.length-1)/2)] : mid);
-    const baseY = P.py + jTop*CELL + 3;
-    const blink = P.blink > 0;
-    const pupils = Math.sign(P.vx) || P.face;
-    const ouch = P.hurtFace > 0;
-    const drawEye = (ex, side)=>{
-      if (ouch){ // > <
-        ctx.fillStyle = '#3a1524';
-        ctx.fillRect(ex + (side<0?0:1), baseY, 1, 1); ctx.fillRect(ex + (side<0?1:0), baseY+1, 1, 1); ctx.fillRect(ex + (side<0?0:1), baseY+2, 1, 1);
-        return;
-      }
-      if (blink){ ctx.fillStyle = '#2a1420'; ctx.fillRect(ex, baseY+1, 2, 1); return; }
-      ctx.fillStyle = '#fff8fa'; ctx.fillRect(ex, baseY, 2, 2);
-      ctx.fillStyle = '#3a1524';
-      ctx.fillRect(ex + (pupils>0?1:0), baseY + (P.vy > 200 ? 1 : P.vy < -100 ? 0 : 1), 1, 1);
-    };
-    let e1, e2;
-    if (lx === rx){ e1 = P.px + lx*CELL + 1; e2 = P.px + lx*CELL + 5; }
-    else { e1 = P.px + lx*CELL + 4; e2 = P.px + rx*CELL + 2; }
-    drawEye(e1, -1); drawEye(e2, 1);
-    // 嘴:起跳张嘴,受伤咧嘴
-    const mx2 = Math.round((e1 + e2)/2 + 1);
-    if (ouch){ ctx.fillStyle = '#3a1524'; ctx.fillRect(mx2-1, baseY+4, 3, 1); }
-    else if (!P.onGround && P.vy < -80){ ctx.fillStyle = '#3a1524'; ctx.fillRect(mx2, baseY+3, 1, 2); }
-    // 濒死:冒汗
-    if (b.n <= 2 && Math.sin(time*6) > 0){ ctx.fillStyle = '#9fe4ff'; ctx.fillRect(Math.round(b.x+b.w+1), Math.round(b.y-1), 1, 2); }
-  }
+  if(!born)drawExplorerFace(b,cellOf);
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -2099,7 +2589,10 @@ function drawEnemies(){
     const ecx = Math.round(e.x + e.w/2);
     const toP = (b.x + b.w/2) > ecx ? 1 : 0;
     if (e.mat === 'stone'){
-      // 石头怪:裂纹 + 发光的眼
+      // 石头怪:肩甲铆钉、岩芯与发光裂纹
+      ctx.fillStyle='#34394c';ctx.fillRect(Math.round(e.x-2),eyY+1,3,6);ctx.fillRect(Math.round(e.x+e.w-1),eyY+1,3,6);
+      ctx.fillStyle='#c3b78f';ctx.fillRect(Math.round(e.x),eyY+2,1,1);ctx.fillRect(Math.round(e.x+e.w),eyY+2,1,1);
+      if(e.h>=24){ctx.fillStyle='#453947';ctx.fillRect(ecx-3,eyY+7,6,5);ctx.fillStyle=e.wind>0?'#fff1b3':'#f1a46c';ctx.fillRect(ecx-1,eyY+8,2,3);}
       ctx.fillStyle = '#5d6272';
       ctx.fillRect(Math.round(e.x+5), Math.round(e.y+e.h-10), 1, 4); ctx.fillRect(Math.round(e.x+6), Math.round(e.y+e.h-7), 3, 1);
       ctx.fillRect(Math.round(e.x+e.w-9), Math.round(e.y+topJ*CELL+9), 1, 5);
@@ -2111,6 +2604,9 @@ function drawEnemies(){
       ctx.fillRect(ecx-5, eyY, 2,2); ctx.fillRect(ecx+3, eyY, 2,2);
       ctx.fillStyle = '#2b0f18';
       ctx.fillRect(ecx-5+toP, eyY+1, 1,1); ctx.fillRect(ecx+3+toP, eyY+1, 1,1);
+      // 不规则耳角和背部斑纹,与玩家护目镜清楚区分
+      ctx.fillStyle=m.edge;ctx.fillRect(Math.round(e.x+1),eyY-5,3,3);ctx.fillRect(Math.round(e.x+e.w-4),eyY-5,3,3);
+      ctx.fillStyle='#bc5478';ctx.fillRect(Math.round(e.x+2),eyY+7,3,2);ctx.fillRect(Math.round(e.x+e.w-5),eyY+9,2,2);
       // 怒眉 + 起跳前张嘴露牙
       ctx.fillRect(ecx-6, eyY-2, 3, 1); ctx.fillRect(ecx+4, eyY-2, 3, 1);
       if (e.wind > 0 || !e.onGround){
@@ -2231,6 +2727,14 @@ function collectLights(){
   }
   for (const it of items) if (it.mat === 'fire' && vis(it.x, it.y)) L.push({x:it.x, y:it.y, r:18, i:0.4, c:'rgba(255,170,60,0.2)'});
   for (const e of enemies) if (e.mat === 'stone' && vis(e.x, e.y)) L.push({x:e.x+e.w/2, y:e.y+6, r:14, i:0.3, c:'rgba(255,140,60,0.2)'});
+  for (const s of seeds) if (!s.got && vis(s.x,s.y)) L.push({x:s.x,y:s.y,r:22,i:0.6,c:'rgba(255,218,120,0.28)'});
+  for (const d of devices){
+    if (!vis(d.x+d.w/2,d.y-8)) continue;
+    const hot=d.type==='jet' && (d.active||d.warning) || d.type==='emberwall'&&!d.open || d.type==='bramble'&&d.progress>0&&!d.open;
+    const friendly=['spring','lift','checkpoint','bud','valve','relay'].includes(d.type);
+    if (hot||friendly) L.push({x:d.x+d.w/2,y:d.y-(hot?d.h/2:8),r:hot?45:24,i:0.65,
+      c:hot?'rgba(255,135,45,0.25)':d.type==='spring'?'rgba(255,133,207,0.18)':'rgba(125,240,230,0.18)'});
+  }
   return L;
 }
 function drawGlow(lights){
@@ -2272,12 +2776,42 @@ function drawHudInCanvas(){
     wFill.style.width = (pct*100).toFixed(1)+'%';
     wFill.style.background = pct > 0.8 ? '#ff7a5a' : wsum >= 12.5 ? '#c9a46a' : '#9a86d8';
   }
+  $('seedCount').textContent = seeds.length ? '✦ ' + seeds.filter(s=>s.got).length + '/' + seeds.length : '';
   const mark = LEVELS[level].rects.some(r => r.t === 'crumble');
   if (mark !== lastMark){ lastMark = mark; wMark.style.display = mark ? 'block' : 'none'; }
+}
+let portraitReady=false;
+function drawTitlePortrait(){
+  if(portraitReady)return;
+  const c=$('portraitCv');c.width=240;c.height=116;
+  const p=c.getContext('2d');p.imageSmoothingEnabled=false;
+  p.save();p.translate(120,59);
+  p.strokeStyle='#62546f';p.lineWidth=1;p.beginPath();p.arc(0,0,45,0,Math.PI*2);p.stroke();
+  p.strokeStyle='#423a50';p.beginPath();p.arc(0,0,51,-Math.PI*0.85,Math.PI*0.85);p.stroke();
+  const mats=['grass','stone','meat','water','fire'];
+  mats.forEach((m,i)=>{const a=-Math.PI/2+i*Math.PI*2/5;drawMaterialBadge(m,Math.cos(a)*52,Math.sin(a)*52,p);});
+  p.scale(2.2,2.2);p.translate(-12,-12);
+  const body=[['grass','meat','stone'],['meat','meat','meat'],['water','meat','fire']];
+  for(let j=0;j<3;j++)for(let i=0;i<3;i++){
+    const m=MAT[body[j][i]],x=i*8,y=j*8;
+    p.fillStyle=m.edge;p.fillRect(x,y,8,8);p.fillStyle=m.c;p.fillRect(x+1,y+1,6,5);p.fillStyle=m.c2;p.fillRect(x+1,y+6,6,1);
+    p.fillStyle='rgba(255,246,216,.42)';p.fillRect(x+1,y+1,4,1);
+  }
+  p.fillStyle='#c8ef99';p.fillRect(3,-3,1,4);p.fillRect(1,-4,3,2);p.fillRect(4,-5,2,2);
+  p.fillStyle='#fff1af';p.fillRect(19,16,2,4);p.fillRect(18,18,4,3);
+  p.fillStyle='#72554b';p.fillRect(3,4,18,4);
+  for(const x of [5,14]){
+    p.fillStyle='#eed29b';p.fillRect(x-1,2,7,7);p.fillStyle='#547380';p.fillRect(x,3,5,5);
+    p.fillStyle='#c5eeee';p.fillRect(x,3,4,4);p.fillStyle='#2b3149';p.fillRect(x+2,4,2,3);p.fillStyle='#fff9d9';p.fillRect(x,3,2,1);
+  }
+  p.fillStyle='#f0ce9d';p.fillRect(11,5,3,1);p.fillStyle='#643e50';p.fillRect(8,11,10,2);p.fillStyle='#e4c399';p.fillRect(9,11,8,1);p.fillRect(15,12,2,3);
+  p.fillStyle='#514453';p.fillRect(10,17,6,6);p.fillStyle='#e9bb77';p.fillRect(11,18,4,4);p.fillStyle='#fff1bb';p.fillRect(12,18,2,3);
+  p.restore();portraitReady=true;
 }
 
 // ═════════════════════════════════════════════ 渲染
 function render(){
+  if(state==='title')drawTitlePortrait();
   if (tilesDirty) redrawTiles();
   const sx = (shake > 0.3 ? (Math.random()-0.5)*shake : 0) + shakeX;
   const sy = (shake > 0.3 ? (Math.random()-0.5)*shake : 0) + shakeY;
@@ -2313,6 +2847,8 @@ function render(){
   gd.addColorStop(1, 'rgba(4,3,7,0.95)');
   ctx.fillStyle = gd;
   ctx.fillRect(cam.x-8, 318, VIEW_W+16, 44);
+  drawChapterWayfinding();
+  drawDevices();
   drawExit();
   drawItems();
   drawEnemies();
@@ -2402,7 +2938,7 @@ function frame(t){
 }
 document.addEventListener('visibilitychange', ()=>{
   paused = document.hidden;
-  if (document.hidden){ for (const k in keys) keys[k] = false; touchDir = 0; endMove(); releaseJump(); if (AC) AC.suspend().catch(()=>{}); if (state === 'play' && !editing) openMenu(); }
+  if (document.hidden){ clearInput(); if (AC) AC.suspend().catch(()=>{}); if (state === 'play' && !editing) openMenu(); }
   else if (AC && !muted) AC.resume().catch(()=>{});
 });
 // iOS 地址栏伸缩时 100vh 不可靠,用真实 innerHeight
@@ -2453,7 +2989,7 @@ let bootLevel = -1;
 /* @debug-start */
 const qs = new URLSearchParams(location.search);
 if (qs.has('lv')) bootLevel = parseInt(qs.get('lv'),10)||0;
-const hm = /^#lv(\d)$/.exec(location.hash || '');     // 试玩跳关:链接后加 #lv3 = 第 4 关
+const hm = /^#lv(\d+)$/.exec(location.hash || '');     // 试玩跳关:链接后加 #lv3 = 第 4 关
 if (hm) bootLevel = Math.min(+hm[1], LEVELS.length-1);
 /* @debug-end */
 if (bootLevel >= 0){
@@ -2472,7 +3008,7 @@ requestAnimationFrame(frame);
 window.__game = {
   get state(){ return state; },
   set state(v){ state = v; },
-  P, LEVELS, loadLevel, get level(){ return level; },
+  P, LEVELS, loadLevel, devices:()=>devices, seeds:()=>seeds, die, get checkpoint(){return checkpoint;}, get level(){ return level; },
   enemies: ()=> enemies, items: ()=> items, bounds, weight,
   placeAt, removeAt, canPlace, connectedWithout, undo, damage: (x,y)=> damagePlayerNear(x,y,1), get tutDone(){ return tutDone; }, tutStep: ()=> tutStep(),
   tile: (x,y)=> gt(x,y), locked: ()=> exitLocked,

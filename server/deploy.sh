@@ -36,9 +36,22 @@ rollback)
     echo "已回滚: $cur → $prev"'
   ;;
 deploy)
+  say "检查服务器安装状态"
+  ssh $SSH_OPTS "$HOST" 'bash -s' < server/ready.sh || {
+    echo "服务安装不完整或未启动。请运行安装模式修复: server/deploy.sh $HOST --install --port 8080"
+    exit 1
+  }
   if command -v node >/dev/null 2>&1; then
     say "跑自动化测试"
-    node tests/smoke.js >/dev/null && node tests/playthrough.js && node tests/combat.js
+    node tests/smoke.js >/dev/null
+    node tests/playthrough.js
+    node tests/combat.js
+    node tests/adventure.js
+    node tests/devices.js
+    node tests/materials.js
+    node tests/channels.js
+    node tests/input-states.js
+    node tests/lava.js
   else
     echo "(没装 node,跳过游戏测试)"
   fi

@@ -71,7 +71,7 @@ def expand(path, domain='game.example.com'):
         real = os.path.join(NG, m.group(1))
     elif path == '/etc/graft/trusted-ips.conf':
         return tokenize('203.0.113.0/24 1;', 'trusted-ips.conf')
-    text = open(real, encoding='utf-8').read().replace('__DOMAIN__', domain)
+    text = open(real, encoding='utf-8').read().replace('__DOMAIN__', domain).replace('__PORT__', '8080')
     if '__' in re.sub(r'#.*', '', text) and re.search(r'__[A-Z]+__', text):
         raise SystemExit('%s 里有未替换的占位符' % real)
     out, toks, k = [], tokenize(text, os.path.basename(real)), 0
@@ -125,7 +125,7 @@ def check(toks, top_ctx, report):
 def main():
     all_err = []
     httpdef, httpused, e = check(expand('/etc/nginx/conf.d/graft-http.conf'), H, None); all_err += e
-    for tpl in ('site-https.conf.tpl', 'site-http.conf.tpl', 'site-acme.conf.tpl'):
+    for tpl in ('site-https.conf.tpl', 'site-http.conf.tpl', 'site-port.conf.tpl', 'site-acme.conf.tpl'):
         d, u, e = check(expand(os.path.join(NG, tpl)), H, None)
         all_err += ['[%s] %s' % (tpl, x) for x in e]
         known = httpdef | d | BUILTIN_VARS

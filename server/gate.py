@@ -233,7 +233,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy', CSP)
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
-        self.send_header('Referrer-Policy', 'no-referrer')
+        # no-referrer 会让浏览器表单 POST 带 Origin: null,误触发同源校验。
+        # same-origin 保留站内来源,同时不向站外泄露 Referer。
+        self.send_header('Referrer-Policy', 'same-origin')
         self.send_header('X-Robots-Tag', 'noindex, nofollow')
         for k, v in headers:
             self.send_header(k, v)

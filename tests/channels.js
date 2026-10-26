@@ -1,0 +1,23 @@
+// 两次配重和双材料共鸣不是装饰:正确的全部条件齐备后才能开门。
+const assert=require('node:assert/strict');
+const {boot}=require('./harness');
+const {G}=boot();
+const step=n=>{for(let i=0;i<n;i++)G.step(1/60)};
+const stand=(cx,row)=>{const b=G.bounds();G.P.px+=cx*8-(b.x+b.w/2);G.P.py+=row*8-(b.y+b.h);G.P.vx=G.P.vy=0;G.P.invuln=0;};
+G.loadLevel(10);step(30);G.items().length=0;
+const door=()=>G.devices().find(d=>d.type==='gate'&&d.id==='garden');
+stand(45,29);G.P.bag.grass=1;G.P.sel='grass';assert(G.placeAt(1,3));step(3);
+assert(G.devices().find(d=>d.type==='bud').lit);assert(!door().open,'只有草不能打开双徽记门');
+assert(G.removeAt(1,3));G.P.bag.fire=1;G.P.sel='fire';assert(G.placeAt(1,3));stand(48,29);step(3);
+assert(G.devices().find(d=>d.type==='relay').lit);assert(door().open,'草与火都点亮才开门');
+G.P.mask.fill(1);step(3);assert(door().open,'开门后无需持续穿戴材料');
+G.loadLevel(8);step(30);G.items().length=0;stand(20,40);
+G.P.bag.stone=2;G.P.sel='stone';assert(G.placeAt(5,4));assert(G.placeAt(5,3));step(3);
+assert(G.devices().find(d=>d.type==='gate'&&d.id==='a').open);
+assert(!G.devices().find(d=>d.type==='gate'&&d.id==='b').open,'底层踏板不会打开上层门');
+stand(44,28);step(3);assert(G.devices().find(d=>d.type==='gate'&&d.id==='b').open);
+G.loadLevel(9);step(30);G.items().length=0;stand(34,29);G.P.bag.water=5;step(3);
+assert(!G.devices().find(d=>d.id==='tide').open,'库存水不能代替上层共鸣');
+G.P.sel='water';assert(G.placeAt(1,3));const n=G.P.mask.filter(x=>x===4).length;step(3);
+assert(G.devices().find(d=>d.id==='tide').open);assert.equal(G.P.mask.filter(x=>x===4).length,n,'共鸣柱不消耗材料');
+console.log('PASS 双材料联动、上下层独立配重、上层水共鸣与永久开门');

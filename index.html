@@ -22,7 +22,7 @@
     <canvas id="cv" width="640" height="360"></canvas>
     <div id="hud">
       <div class="tl">拾色 <b>GRAFT</b></div>
-      <div class="tr"><span id="wbar" title="重量:越重跳得越低,12.5 以上能压塌脆地板"><b>W</b><span class="tk"><i></i><em></em></span></span><span id="lv"></span>
+      <div class="tr"><span id="wbar" title="重量:越重跳得越低,12.5 以上能压塌脆地板"><b>W</b><span class="tk"><i></i><em></em></span></span><span id="seedCount" aria-label="本关光种"></span><span id="lv"></span>
         <button class="ibtn" id="btnPause" type="button" aria-label="暂停">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10"/></svg>
         </button>
@@ -44,6 +44,7 @@
         <div class="ed-head"><span>改造身体</span><small id="edW"></small></div>
         <canvas id="edCv" width="256" height="256"></canvas>
         <div id="edBag"></div>
+        <div id="edMatHint" class="ed-material" aria-live="polite"></div>
         <div class="ed-tip">点<b>空位</b>贴上所选材料 · 点<b>身体</b>削下一格<br><i class="lg ok"></i>可贴　<i class="lg cut"></i>可削　<i class="lg no"></i>被墙挡住</div>
         <div class="ed-row"><button id="edUndo" class="btn" type="button" disabled>撤　销</button><button id="edDone" class="btn primary" type="button">完　成</button></div>
       </div>
@@ -61,14 +62,16 @@
     </div>
 
     <div id="overlay">
+      <canvas id="portraitCv" width="240" height="116" aria-label="戴护目镜的拼装小探险家"></canvas>
       <div class="logo">拾色</div>
-      <div class="sub">G R A F T</div>
+      <div class="sub">拼出自己的冒险</div>
+      <div class="journey-note">五种材料 · 十二处遗迹 · 不止一条路</div>
       <div class="menu">
         <button class="btn primary" id="btnStart" type="button">开始游戏</button>
         <button class="btn" id="btnCont" type="button"></button>
       </div>
       <div class="keys desk">
-        <kbd>A</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳　<kbd>左键</kbd> 贴一格　<kbd>右键</kbd> 削一格<br>
+        <kbd>A</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳　点击身体削一格　点击空位贴一格<br>
         <kbd>1</kbd>–<kbd>5</kbd> 选材料　<kbd>E</kbd> 改造面板　<kbd>Z</kbd> 撤销　<kbd>Esc</kbd> 暂停　<kbd>M</kbd> 静音
       </div>
       <div class="keys ios" id="iosTip" hidden>iPhone:点 Safari 底部的 <b>分享</b> → <b>添加到主屏幕</b>,从桌面图标打开就是全屏</div>

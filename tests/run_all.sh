@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键跑全部自测:bash tests/run_all.sh
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 echo "── 游戏:各关加载 / 自动通关 / 战斗"
 node --check src/game.js
@@ -8,6 +8,16 @@ node tests/smoke.js | tail -1
 node tests/playthrough.js
 node tests/combat.js
 node tests/undo.js
+node tests/editing.js
+node tests/input-states.js
+node tests/grass.js
+node tests/lava.js
+node tests/devices.js
+node tests/materials.js
+node tests/channels.js
+node tests/adventure.js
+GRAFT_TEST_FPS=30 node tests/adventure.js
+GRAFT_TEST_FPS=120 node tests/adventure.js
 echo "── 口令网关"
 python3 -I tests/test_gate.py 2>&1 | grep -E "^(Ran|OK|FAILED)|并发"
 echo "── nginx 配置静态检查"
