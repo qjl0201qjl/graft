@@ -235,3 +235,37 @@ body.touch #hint{bottom:auto;top:66px;left:14px;right:auto;max-width:56%;font-si
 
 /* 可选收集进度,不增加游戏按钮。 */
 #seedCount{color:#ffdf98;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:clamp(10px,1vw,13px)}
+
+/* 拼豆工坊：图纸抽屉 / 实物豆板 / 颜色盒。 */
+#beadBook.hide{display:none}
+#beadBook{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:max(12px,var(--sat)) max(12px,var(--sar)) max(12px,var(--sab)) max(12px,var(--sal));background:#100e1beF;overflow:auto;touch-action:pan-y}
+.book-shell{width:min(960px,100%);max-height:100%;overflow:auto;background:#211e31;border:1px solid #9b7b88;border-radius:18px;box-shadow:0 24px 80px #0008;touch-action:pan-y}
+.book-head{display:flex;justify-content:space-between;gap:12px;padding:22px 26px 16px;border-bottom:1px solid #75616c66}
+.book-head small{color:#e0cba6;font-size:11px;letter-spacing:.15em}.book-head h1{font-family:"Songti SC",STSong,serif;font-size:clamp(20px,3vw,29px);font-weight:500;letter-spacing:.08em;margin:9px 0;color:#f8e9d2}.book-head p{color:#c4b8cd;font-size:12px;line-height:1.7;margin:0}
+.book-head button{align-self:flex-start;border:1px solid #8d7484;background:#3d3048;border-radius:20px;padding:10px 16px;min-height:44px;cursor:pointer;white-space:nowrap}
+.book-content{display:grid;grid-template-columns:145px minmax(200px,1fr) 210px;gap:22px;padding:22px 26px 26px;align-items:start}
+#bookPatterns{display:flex;flex-direction:column;gap:8px}.pattern{display:grid;grid-template-columns:44px 1fr;grid-template-rows:1fr 1fr;gap:2px 5px;text-align:left;align-items:center;cursor:pointer;background:#2c263c;border:1px solid #66566e;padding:7px;border-radius:10px;min-height:62px}.pattern canvas{width:44px;height:44px;grid-row:1/span 2;image-rendering:pixelated}.pattern strong{font-size:12px;font-weight:500;align-self:end}.pattern small{font-size:10px;color:#c4b0a0;align-self:start}.pattern.selected{border-color:#f0c58f;background:#4e3b4f;box-shadow:inset 0 0 0 1px #f0c58f44}.pattern:disabled{opacity:.45;cursor:default}
+.book-work{display:flex;flex-direction:column;align-items:center;gap:12px}.book-caption{display:flex;justify-content:space-between;width:100%;font-size:13px;color:#e9d2bd}.book-caption strong{font-weight:500}.book-caption span{color:#bfb2cf;font-size:12px}
+#bookCv{width:100%;max-width:320px;height:auto;aspect-ratio:1;border:8px solid #b99779;border-radius:14px;box-shadow:0 5px 0 #755e50,0 14px 25px #100c1b99;touch-action:none;cursor:crosshair}
+.book-tools{display:flex;flex-direction:column;gap:10px}.book-instruction,.book-footnote{font-size:12px;color:#d2c1cd;line-height:1.85;margin:0}.book-footnote{color:#afa0b8;font-size:10px}.book-tools .btn{min-width:0;letter-spacing:.06em;text-indent:0;min-height:44px;padding:10px 8px;font-size:13px}
+#bookPalette{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.bead-color{min-height:44px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:11px;background:#292438;border:1px solid #746376;border-radius:8px;padding:5px;cursor:pointer}.bead-color:before{content:"";width:18px;height:18px;flex-shrink:0;border-radius:50%;background:radial-gradient(circle,#44384c 0 18%,var(--bead) 23% 59%,#fff8 62% 66%,var(--bead) 70%);box-shadow:0 2px 0 #100d19}.bead-color.selected{border-color:var(--bead);box-shadow:0 0 0 1px var(--bead);background:#44364a}
+#bookMessage{font-size:12px;color:#f3d29f;line-height:1.7;min-height:3.4em;margin:2px 0}
+#bookUndo{border:0;background:none;color:#bcb0cc;text-decoration:underline;min-height:36px;cursor:pointer}.book-tools button:disabled{opacity:.4;cursor:default}.book-shell button:focus-visible{outline:2px solid #ffc371;outline-offset:3px}
+body.crafting #pad{visibility:hidden}
+.ed-quick{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}.ed-quick button{padding:8px 9px;min-height:36px;border-radius:6px;background:#30273c;color:#eddbca;border:1px solid #8a707c;font-size:11px;cursor:pointer}.ed-quick button:active{background:#574053}
+#move{padding:0;gap:8px;border:0;background:none;box-shadow:none;overflow:visible}#move .ar,#move .knob{display:none}.direction{width:calc(50% - 4px);height:100%;pointer-events:none;border:1px solid #a28baf88;border-radius:22px;background:#292039dd;color:#ecdfed;font-size:24px;box-shadow:inset 0 2px #c7b4cf22,0 5px #100d1b}.direction{pointer-events:auto}.direction:active{background:#665073}
+#btnEdit{border-radius:18px;border-color:#b39a83aa;background:#4a374bdd;font-size:15px}
+body.touch .ibtn{width:36px;height:36px;padding:7px}
+@media(max-width:600px){
+ #beadBook{padding:max(6px,var(--sat)) 6px max(6px,var(--sab))}.book-shell{border-radius:12px}.book-head{padding:14px;gap:8px}.book-head h1{font-size:20px}.book-head p{font-size:11px}.book-head button{padding:8px 12px;font-size:12px}.book-content{grid-template-columns:1fr;gap:15px;padding:12px 14px 18px}
+ #bookPatterns{flex-direction:row;overflow-x:auto;touch-action:pan-x;padding:2px 2px 8px;gap:7px}.pattern{flex:0 0 91px;grid-template-columns:1fr;grid-template-rows:44px auto auto;justify-items:center;text-align:center;padding:6px 2px;gap:3px}.pattern canvas{grid-row:auto}.pattern strong{font-size:11px}.pattern small{font-size:10px}.book-work{gap:9px}#bookCv{width:min(74vw,calc(var(--vh)*34),300px)}.book-caption{max-width:320px}.book-tools{display:grid;grid-template-columns:1fr 1fr;gap:8px}.book-instruction,#bookPalette,#bookMessage,.book-footnote{grid-column:1/-1}#bookPalette{grid-template-columns:repeat(5,1fr);gap:5px}.bead-color{flex-direction:column;gap:3px;font-size:10px;min-height:49px;padding:4px 1px}.book-instruction{font-size:11px}#bookMessage{min-height:0;font-size:11px}.book-footnote{font-size:10px}#bookUndo{grid-column:1/-1;min-height:28px}
+ body.touch .tr{top:3px;right:5px;gap:5px}body.touch.tall #bag{top:47px}body.touch.tall #wbar .tk{width:45px}body.touch #hint{top:86px}
+ .ed-head{letter-spacing:.05em;gap:6px}.ed-head small{font-size:10px}body.touch .ed-panel{width:100%;height:100%;gap:6px;align-content:center;padding:10px;overflow:auto}body.touch .ed-panel #edCv{width:min(62vw,calc(var(--vh)*29),240px)}body.touch #edBag{gap:5px}body.touch #edBag .chip{padding:8px 7px;font-size:12px}body.touch .ed-tip{font-size:10px}
+}
+@media(orientation:landscape) and (max-height:500px){
+ .book-head{padding:12px 18px}.book-head h1{font-size:22px;margin:4px 0}.book-content{gap:14px;padding:14px 18px;grid-template-columns:125px minmax(150px,1fr) 190px}#bookCv{max-width:240px}.book-tools{gap:7px}.book-instruction{font-size:11px}.book-caption{font-size:12px}.ed-panel{grid-template-rows:repeat(6,auto);gap:4px;max-width:96%}.ed-panel #edCv{grid-row:1/span 6;width:calc(var(--vh)*63)}.ed-head,#edBag,.ed-quick,#edMatHint,.ed-tip,.ed-row{grid-column:2}.ed-tip{font-size:10px}.ed-head small{font-size:10px}
+}
+#bookCv.fused{border-color:#d9b47b;box-shadow:0 5px 0 #806442,0 0 26px #e6b87544;animation:fuse-in .35s ease-out}
+@keyframes fuse-in{0%{transform:scale(.97);filter:brightness(1.35)}100%{transform:scale(1);filter:brightness(1)}}
+.ed-quick button:disabled{opacity:.4;cursor:default}
+@media(prefers-reduced-motion:reduce){#bookCv.fused{animation:none}}

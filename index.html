@@ -39,11 +39,12 @@
       <div id="card"><div class="cn"></div><div class="cs"></div></div>
     </div>
 
-    <div id="editor" class="hide" role="dialog" aria-label="改造身体">
+    <div id="editor" class="hide" role="dialog" aria-label="拼豆改造">
       <div class="ed-panel">
-        <div class="ed-head"><span>改造身体</span><small id="edW"></small></div>
+        <div class="ed-head"><span>拼豆改造</span><small id="edW"></small></div>
         <canvas id="edCv" width="256" height="256"></canvas>
         <div id="edBag"></div>
+        <div class="ed-quick"><button id="edSlim" type="button">瘦身钻洞</button><button id="edLight" type="button">收回石豆</button><button id="edAttach" type="button">贴一颗所选豆</button></div>
         <div id="edMatHint" class="ed-material" aria-live="polite"></div>
         <div class="ed-tip">点<b>空位</b>贴上所选材料 · 点<b>身体</b>削下一格<br><i class="lg ok"></i>可贴　<i class="lg cut"></i>可削　<i class="lg no"></i>被墙挡住</div>
         <div class="ed-row"><button id="edUndo" class="btn" type="button" disabled>撤　销</button><button id="edDone" class="btn primary" type="button">完　成</button></div>
@@ -55,6 +56,7 @@
         <div class="pm-head">暂　停<small id="pmLevel"></small></div>
         <button id="pmResume" class="btn primary" type="button">继续</button>
         <button id="pmRetry" class="btn" type="button">重来本关</button>
+        <button id="pmBook" class="btn" type="button">拼豆图册</button>
         <div class="pm-sub">选关</div>
         <div id="pmLevels"></div>
         <div class="pm-row"><button id="pmSound" class="btn" type="button">声音:开</button><button id="pmTitle" class="btn" type="button">回到标题</button></div>
@@ -65,30 +67,42 @@
       <canvas id="portraitCv" width="240" height="116" aria-label="戴护目镜的拼装小探险家"></canvas>
       <div class="logo">拾色</div>
       <div class="sub">拼出自己的冒险</div>
-      <div class="journey-note">五种材料 · 十二处遗迹 · 不止一条路</div>
+      <div class="journey-note">捡光种 · 拼挂件 · 带着作品去冒险</div>
       <div class="menu">
         <button class="btn primary" id="btnStart" type="button">开始游戏</button>
         <button class="btn" id="btnCont" type="button"></button>
+        <button class="btn" id="btnBook" type="button">拼豆图册</button>
       </div>
       <div class="keys desk">
         <kbd>A</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳　点击身体削一格　点击空位贴一格<br>
         <kbd>1</kbd>–<kbd>5</kbd> 选材料　<kbd>E</kbd> 改造面板　<kbd>Z</kbd> 撤销　<kbd>Esc</kbd> 暂停　<kbd>M</kbd> 静音
       </div>
       <div class="keys ios" id="iosTip" hidden>iPhone:点 Safari 底部的 <b>分享</b> → <b>添加到主屏幕</b>,从桌面图标打开就是全屏</div>
-      <div class="keys touch">左下拇指 <b>滑动</b> 移动 · 右下 <b>跳</b> · <b>改</b> 打开改造面板<br>也可以直接点自己身体削格、点旁边空位贴格</div>
+      <div class="keys touch">左下 <b>左右</b> 移动 · 右下轻点 <b>跳</b><br>点 <b>豆板</b> 暂停改造，瘦身、收石、贴功能豆</div>
     </div>
   </div>
 
-  <div id="pad" aria-hidden="true">
-    <div id="move"><span class="ar l"></span><span class="knob"></span><span class="ar r"></span></div>
+  <div id="pad">
+    <div id="move"><button type="button" class="direction" aria-label="向左移动">◀</button><span class="ar l"></span><span class="knob"></span><span class="ar r"></span><button type="button" class="direction" aria-label="向右移动">▶</button></div>
     <div class="rbtns">
       <button id="btnUndo" class="off" type="button" aria-label="撤销">↶</button>
-      <button id="btnEdit" type="button">改</button>
+      <button id="btnEdit" type="button">豆板</button>
       <button id="btnJump" type="button">跳</button>
     </div>
   </div>
   <div id="rotate">横过来玩更爽 ↻</div>
+  <section id="beadBook" class="hide" role="dialog" aria-modal="true" aria-labelledby="bookHeading">
+    <div class="book-shell">
+      <header class="book-head"><div><small>拾色 · 拼豆工坊</small><h1 id="bookHeading">把冒险，一颗颗留下来</h1><p id="bookGoal"></p></div><button id="bookClose" type="button" aria-label="关闭拼豆图册">返回</button></header>
+      <div class="book-content">
+        <nav id="bookPatterns" aria-label="拼豆图纸"></nav>
+        <div class="book-work"><div class="book-caption"><strong id="bookName"></strong><span id="bookProgress" aria-live="polite"></span></div><canvas id="bookCv" width="320" height="320" aria-label="拼豆板，选颜色后点按或滑动填豆"></canvas></div>
+        <div class="book-tools"><p class="book-instruction">对照浅色图纸选颜色，按住滑动穿豆。中间的小孔就是拼豆。</p><div id="bookPalette" aria-label="豆子颜色"></div><p id="bookMessage" role="status"></p><button id="bookUndo" type="button">撤回一颗</button><button id="bookFinish" class="btn primary" type="button">熨烫成挂件</button><button id="bookWear" class="btn" type="button">戴上挂件</button><p class="book-footnote">图纸用光种解锁，不扣光种。挂件只改变外观，闯关材料仍要在关内拾取。</p></div>
+      </div>
+    </div>
+  </section>
 </div>
+<script src="src/beads.js"></script>
 <script src="src/game.js"></script>
 </body>
 </html>

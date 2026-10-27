@@ -22,6 +22,7 @@ function makeEl(tag){
                  toggle:(c,f)=>{ const on = f===undefined ? !cls.has(c) : !!f; on?cls.add(c):cls.delete(c); return on; },
                  contains:c=>cls.has(c) },
     _ctx:null,
+    setAttribute(k,v){this[k]=v;}, focus(){}, getClientRects(){return [{}];},
     getContext(){ return this._ctx || (this._ctx = makeCtx()); },
     addEventListener(type, fn){ if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
     removeEventListener(type, fn){ listeners.get(type)?.delete(fn); },
@@ -57,6 +58,7 @@ function boot(opts){
   if (opts.touch) win.ontouchstart = null;
   const file = opts.file || path.join(__dirname, '..', 'src', 'game.js');
   vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'beads.js'), 'utf8'), win);
   vm.runInContext(fs.readFileSync(file, 'utf8'), win, { filename:'game.js' });
   return { G: win.__game, els, win };
 }

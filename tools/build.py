@@ -127,7 +127,7 @@ def main():
     shutil.rmtree(DIST, ignore_errors=True)
     os.makedirs(os.path.join(DIST, 'static'))
 
-    js = minify_js(strip_debug(read('src/game.js')))
+    js = minify_js(strip_debug(read('src/beads.js') + '\n' + read('src/game.js')))
     css = minify_css(read('src/style.css'))
     js_name, css_name = 'static/game.%s.js' % h8(js), 'static/style.%s.css' % h8(css)
     write(js_name, js); write(css_name, css)
@@ -143,7 +143,7 @@ def main():
         ic['src'] = icons.get(ic['src'], ic['src'])
     write('manifest.webmanifest', json.dumps(man, ensure_ascii=False, separators=(',', ':')))
 
-    html = read('index.html').replace('src/game.js', js_name).replace('src/style.css', css_name)
+    html = read('index.html').replace('<script src="src/beads.js"></script>', '').replace('src/game.js', js_name).replace('src/style.css', css_name)
     for a, b in icons.items():
         html = html.replace(a, b)
     if 'src/' in html or 'assets/' in html:
