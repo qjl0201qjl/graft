@@ -269,3 +269,9 @@ body.touch .ibtn{width:36px;height:36px;padding:7px}
 @keyframes fuse-in{0%{transform:scale(.97);filter:brightness(1.35)}100%{transform:scale(1);filter:brightness(1)}}
 .ed-quick button:disabled{opacity:.4;cursor:default}
 @media(prefers-reduced-motion:reduce){#bookCv.fused{animation:none}}
+
+/* ── 选关面板(标题页直接进) */
+#levelPick{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(6,5,10,.82);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);z-index:7}
+#levelPick.hide{display:none}
+#lpGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.lvb.todo{opacity:.72;border-style:dashed;color:#a79ec4}

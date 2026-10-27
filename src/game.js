@@ -694,9 +694,10 @@ function snapshotCheckpoint(index){
   arp([523,784,1046],70); vibrate(20);
 }
 function respawnCheckpoint(){
-  const saved = checkpoint;
+  // 硬核模式:没有青旗,散架就从关卡开头重来
+  const saved = store.get('hard', false) ? null : checkpoint;
   loadLevel(level,true);
-  if (!saved) return;
+  if (!saved){ toast('硬核:从头再来'); return; }
   checkpoint = saved;
   P.mask.set(saved.mask); P.bag = Object.assign({},saved.bag); P.sel = saved.sel;
   P.px=saved.px; P.py=saved.py; P.vx=P.vy=0; P.invuln=1.5; jumpBuf=0; P.touchFlight=false;
@@ -1518,16 +1519,16 @@ function openMenu(){
   clearInput();
   $('pmLevel').textContent = LEVELS[level].name;
   $('pmSound').textContent = muted ? '声音:关' : '声音:开';
+  $('pmHard').textContent = store.get('hard', false) ? '硬核:开(无青旗)' : '硬核:关';
   const grid = $('pmLevels'); grid.textContent = '';
   const un = Math.max(store.get('unlocked', 0), level);
   LEVELS.forEach((L, i)=>{
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'lvb' + (i === level ? ' cur' : '');
+    b.type = 'button'; b.className = 'lvb' + (i === level ? ' cur' : '') + (i > un ? ' todo' : '');
     const stars = (store.get('seeds', {})[i] || 0);
     b.textContent = L.name.split(' · ')[0];
     if (stars){ const badge=document.createElement('small'); badge.textContent='✦'.repeat(stars); b.appendChild(badge); }
-    b.title = L.name + ' · 最佳光种 ' + stars + '/3';
-    b.disabled = i > un;
+    b.title = L.name + ' · 最佳光种 ' + stars + '/3' + (i > un ? ' · 还没通关' : '');
     b.addEventListener('click', ()=>{ closeMenu(true); loadLevel(i); });
     grid.appendChild(b);
   });
@@ -1542,6 +1543,7 @@ $('btnPause').addEventListener('click', ()=>{ ac(); menuOpen ? closeMenu() : ope
 $('pmResume').addEventListener('click', ()=> closeMenu());
 $('pmRetry').addEventListener('click', ()=>{ closeMenu(true); loadLevel(level, true); });
 $('pmSound').addEventListener('click', ()=>{ setMuted(!muted); $('pmSound').textContent = muted ? '声音:关' : '声音:开'; });
+$('pmHard').addEventListener('click', ()=>{ const v = !store.get('hard', false); store.set('hard', v); $('pmHard').textContent = v ? '硬核:开(无青旗)' : '硬核:关'; tone(v?620:320, v?380:620, .07, 'triangle', .04); });
 $('pmTitle').addEventListener('click', ()=>{ closeMenu(true); showTitle(); });
 menuEl.addEventListener('pointerdown', e=>{ if (e.target === menuEl){ e.preventDefault(); closeMenu(); } });
 
@@ -3046,6 +3048,37 @@ $('btnBook').addEventListener('click',()=>beadBook.open());
 $('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
 $('btnCont').addEventListener('click', ()=> startGame(true));
+
+// ─── 选关:标题页也能直接进任意一关(不再按解锁进度锁死)
+const lpEl = $('levelPick');
+function fillLevelPick(cur, onPick){
+  const grid = $('lpGrid'); grid.textContent = '';
+  const un = Math.max(store.get('unlocked', 0), store.get('best', 0));
+  LEVELS.forEach((L, i)=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lvb' + (i === cur ? ' cur' : '') + (i > un ? ' todo' : '');
+    b.textContent = L.name.split(' · ')[0];
+    const stars = (store.get('seeds', {})[i] || 0);
+    if (stars){ const s = document.createElement('small'); s.textContent = '✦'.repeat(stars); b.appendChild(s); }
+    b.title = L.name + ' · ' + (L.sub || '') + (i > un ? ' · 还没通关' : '');
+    b.addEventListener('click', ()=> onPick(i));
+    grid.appendChild(b);
+  });
+}
+function openLevelPick(){
+  fillLevelPick(-1, (i)=>{
+    lpEl.classList.add('hide');
+    ov.classList.add('hide');
+    document.body.classList.remove('menu');
+    ac();
+    stats.start = performance.now(); stats.deaths = 0;
+    loadLevel(i);
+  });
+  lpEl.classList.remove('hide');
+}
+$('btnPick').addEventListener('click', openLevelPick);
+$('lpClose').addEventListener('click', ()=> lpEl.classList.add('hide'));
 refreshContinue();
 setMuted(muted);
 if (IS_TOUCH) setTouchMode(true);
