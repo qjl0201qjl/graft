@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # 一键跑全部自测:bash tests/run_all.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,6 +19,7 @@ node tests/devices.js
 node tests/materials.js
 node tests/channels.js
 node tests/adventure.js
+node tests/trials.js
 GRAFT_TEST_FPS=30 node tests/adventure.js
 GRAFT_TEST_FPS=120 node tests/adventure.js
 echo "── 口令网关"
