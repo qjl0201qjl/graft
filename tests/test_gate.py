@@ -48,6 +48,7 @@ class GateTest(unittest.TestCase):
         r, d = self.req('GET', '/__gate/login')
         self.assertEqual(r.status, 200)
         self.assertIn("default-src 'none'", r.getheader('Content-Security-Policy'))
+        self.assertEqual(r.getheader('Referrer-Policy'), 'same-origin')
         self.assertNotIn(b'<script', d)
 
     def test_03_wrong_code(self):
@@ -90,6 +91,16 @@ class GateTest(unittest.TestCase):
         r, _ = self.req('GET', '/__gate/logout')
         self.assertEqual(r.status, 303); self.assertTrue(all('Max-Age=0' in v for v in r.msg.get_all('Set-Cookie')))
         r, _ = self.req('GET', '/__gate/health'); self.assertEqual(r.status, 200)
+
+    def test_10_browser_form_origin(self):
+        headers = {'Host': '8.137.175.63:8080', 'X-Forwarded-Proto': 'http',
+                   'Origin': 'http://8.137.175.63:8080'}
+        r, _ = self.req('POST', '/__gate/login', {'code': CODE}, headers=headers)
+        self.assertEqual(r.status, 303)
+        for origin in ('null', 'http://evil.example', 'http://8.137.175.63:8081'):
+            r, _ = self.req('POST', '/__gate/login', {'code': CODE},
+                            headers=dict(headers, Origin=origin))
+            self.assertEqual(r.status, 403)
 
     def test_08_hot_reload_new_code(self):
         env = dict(os.environ, GRAFT_CODE='second-code-77')

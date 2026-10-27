@@ -33,7 +33,9 @@ expect "错误口令"                      401 -X POST -d "code=definitely-wrong
 expect "跨站提交口令被拒"              403 -X POST -H "Origin: https://evil.example" --data-urlencode "code=$CODE" "$BASE/__gate/login"
 
 echo "登录"
-got=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -c "$JAR" -X POST --data-urlencode "code=$CODE" "$BASE/__gate/login")
+LOGIN_HEADERS=$(curl -s -D - -o /dev/null -A "$UA" "$BASE/__gate/login")
+echo "$LOGIN_HEADERS" | grep -qi '^Referrer-Policy: same-origin' && ok "登录页保留站内表单来源" || bad "登录页来源策略" "浏览器表单可能发 Origin: null"
+got=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -c "$JAR" -X POST -H "Origin: $BASE" --data-urlencode "code=$CODE" "$BASE/__gate/login")
 [ "$got" = "303" ] && ok "正确口令 → 303" || { bad "正确口令" "得到 $got(口令错了?或被限流/封禁)"; }
 grep -q gt_sig "$JAR" && ok "拿到签名 cookie" || bad "签名 cookie" "没有"
 H=$(curl -s -D - -o /dev/null -A "$UA" -b "$JAR" "$BASE/")

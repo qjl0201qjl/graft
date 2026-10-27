@@ -116,6 +116,7 @@ canvas{display:block}
 #edBag .chip i{width:12px;height:12px}
 .ed-tip{font-size:11px;color:#8a80a5;line-height:1.7;text-align:center;letter-spacing:.04em}
 .ed-tip b{color:#d6cdee;font-weight:500}
+.ed-material{max-width:310px;color:#b9d5bd;font-size:11px;line-height:1.6;text-align:center}
 .lg{display:inline-block;width:9px;height:9px;border:1.5px solid;vertical-align:-1px;margin:0 2px 0 6px;border-radius:1px}
 .lg.ok{border-color:#e8e1ff}.lg.cut{border-color:#ff7a7a}.lg.no{border-color:#5a4f6f;background:repeating-linear-gradient(45deg,#5a4f6f 0 1.5px,transparent 1.5px 4px)}
 
@@ -130,9 +131,22 @@ canvas{display:block}
 .pm-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;letter-spacing:.3em;color:#efe9ff;font-size:clamp(13px,1.4vw,16px)}
 .pm-head small{letter-spacing:.08em;color:#8a80a5;font-size:.8em}
 .pm-sub{margin-top:4px;font-size:11px;color:#7e7396;letter-spacing:.2em}
-#pmLevels{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+#pmLevels{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
 .lvb{padding:7px 0;border:1px solid #3a3352;border-radius:4px;background:#17141f;color:#cfc6e6;cursor:pointer;font-size:14px}
 .lvb.cur{border-color:#7d66c2;background:#2a2142;color:#fff}
+.lvb small{display:block;color:#ffdf98;font-size:8px;line-height:1.4;margin-top:3px}
+.journey-note{font-size:11px;color:#b9accb;letter-spacing:.08em;margin-top:10px}
+#portraitCv{width:clamp(156px,20vw,240px);height:auto;image-rendering:pixelated;margin-bottom:6px}
+#overlay .logo{font-family:"Songti SC","STSong","PingFang SC",serif;letter-spacing:.38em;color:#f3e6cc;text-shadow:0 3px 0 #493952,0 0 36px #a88bd155}
+#overlay .sub{letter-spacing:.35em;color:#c6b08c;font-size:clamp(10px,1vw,13px)}
+#overlay .btn.primary{background:linear-gradient(#4b3b50,#2e293d);border-color:#bc9c76;box-shadow:inset 0 1px #e8d2aa44,0 7px 24px #09080e88;animation:none;color:#faecd2}
+.ed-panel,.pm-panel{border-color:#65566a;box-shadow:0 22px 60px #06050b99,inset 0 1px #bca17b33}
+.chip i{outline:1px solid #dac7a955;outline-offset:1px}
+.chip.on{border-color:#dfc29b;box-shadow:0 0 0 1px #67525e,0 0 12px -4px #e6be83}
+.keys{color:#a59ab6}
+#hint{color:#b4a7c3;font-size:clamp(10px,1.05vw,13px)}
+#toast{max-width:88%;white-space:normal;text-align:center;line-height:1.6;font-size:clamp(11px,1.35vw,16px);letter-spacing:.12em;color:#f6e6ca}
+@media (orientation:landscape) and (max-height:500px){#portraitCv{width:122px;margin-bottom:0}#overlay .logo{font-size:30px}.journey-note{margin-top:4px}}
 .lvb:disabled{opacity:.3;cursor:default}
 .pm-row{display:flex;gap:8px}.pm-row .btn{flex:1;min-width:0;padding-left:.4em;padding-right:.4em;letter-spacing:.1em;text-indent:.1em}
 .keys.ios{color:#b8aee0;font-size:12px;line-height:1.7;max-width:30em}
@@ -218,3 +232,6 @@ body.touch #hint{bottom:auto;top:66px;left:14px;right:auto;max-width:56%;font-si
   .ed-head,#edBag,.ed-tip,#edDone{grid-column:2}
 }
 @media (prefers-reduced-motion:reduce){.btn.primary{animation:none}}
+
+/* 可选收集进度,不增加游戏按钮。 */
+#seedCount{color:#ffdf98;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:clamp(10px,1vw,13px)}
