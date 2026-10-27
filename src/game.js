@@ -220,14 +220,15 @@ const music = {
 
 // ═════════════════════════════════════════════ 输入
 const keys = Object.create(null);
-let kJump = false, jumpBuf = 0, touchDir = 0;
+let kJump = false, jumpBuf = 0, touchDir = 0, bufferedTouchJump = false, bookOpen = false;
 const mouse = {x:-999, y:-999, inside:false};
 
-function pressJump(){ jumpBuf = 0.13; kJump = true; keys['Space'] = true; }
+function pressJump(touch){ jumpBuf = 0.18; bufferedTouchJump = !!touch; kJump = true; keys['Space'] = true; }
 function releaseJump(){ kJump = false; keys['Space'] = false; }
 function jumpHeld(){ return !!keys['Space']; }
 
 addEventListener('keydown', e=>{
+  if (bookOpen) return;
   if (e.repeat) { if(['Space','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); return; }
   keys[e.code] = true;
   if (['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab'].includes(e.code)) e.preventDefault();
@@ -274,7 +275,7 @@ cv.addEventListener('pointermove', e=>{
 cv.addEventListener('pointerleave', e=>{ if (e.pointerType === 'mouse'){ mouse.inside = false; mouse.x = mouse.y = -999; } });
 cv.addEventListener('contextmenu', e=> e.preventDefault());
 cv.addEventListener('pointerdown', e=>{
-  if (state !== 'play' || editing || menuOpen) return;
+  if (state !== 'play' || editing || menuOpen || bookOpen) return;
   const p = screenToWorld(e);
   if (e.pointerType === 'mouse'){
     if (e.button !== 0 && e.button !== 2) return;
@@ -288,12 +289,12 @@ cv.addEventListener('pointerdown', e=>{
     else placeAt(i,j);
     return;
   }
-  // 手指:点身体 = 削,点身旁空位 = 贴;容差一格,点歪了吸附到最近的合法格
+  // 手机只把角色当作豆板入口；不再在移动中的小角色上误削一格。
   if (!touchMode) setTouchMode(true);
   const pick = nearestEditable(p.x, p.y);
   if (!pick) return;
   e.preventDefault();
-  if (pick.filled) removeAt(pick.i, pick.j); else placeAt(pick.i, pick.j);
+  openEditor();
 });
 cv.addEventListener('wheel', e=>{
   e.preventDefault();
@@ -304,11 +305,11 @@ cv.addEventListener('wheel', e=>{
 // ─── 触屏手柄
 const moveEl = $('move'), knob = moveEl.querySelector('.knob');
 const arL = moveEl.querySelector('.ar.l'), arR = moveEl.querySelector('.ar.r');
-let movePid = null, jumpTouch = false;
+let movePid = null, jumpTouch = false, jumpPid = null;
 function updMove(e){
   const r = moveEl.getBoundingClientRect();
   const dx = e.clientX - (r.left + r.width/2);
-  const dead = r.width*0.08;
+  const dead = r.width*0.025;
   touchDir = dx > dead ? 1 : dx < -dead ? -1 : 0;
   const kx = clamp(dx, -r.width/2+22, r.width/2-22);
   knob.style.transform = 'translateX('+kx.toFixed(1)+'px)';
@@ -321,30 +322,38 @@ function endMove(){
 }
 moveEl.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
-  if (state !== 'play' || editing || menuOpen) return;
+  if (state !== 'play' || editing || menuOpen || bookOpen) return;
+  if (movePid !== null) return;
   movePid = e.pointerId; try { moveEl.setPointerCapture(e.pointerId); } catch(_){}
   updMove(e);
 });
 moveEl.addEventListener('pointermove', e=>{ if (e.pointerId === movePid) updMove(e); });
 moveEl.addEventListener('pointerup', e=>{ if (e.pointerId === movePid) endMove(); });
+moveEl.querySelectorAll('.direction').forEach((button,i)=>{
+  button.addEventListener('keydown',e=>{if(e.code!=='Space'&&e.code!=='Enter')return;e.preventDefault();e.stopPropagation();if(state==='play'&&!editing&&!menuOpen&&!bookOpen)touchDir=i===0?-1:1;});
+  button.addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();e.stopPropagation();endMove();}});
+  button.addEventListener('blur',endMove);
+});
 moveEl.addEventListener('pointercancel', e=>{ if (e.pointerId === movePid) endMove(); });
 moveEl.addEventListener('lostpointercapture', e=>{ if (e.pointerId === movePid) endMove(); });
 
 const jBtn = $('btnJump');
 jBtn.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
-  if (state !== 'play' || editing || menuOpen) return;
+  if (state !== 'play' || editing || menuOpen || bookOpen) return;
+  if (jumpPid !== null) return;
+  jumpPid = e.pointerId;
   try { jBtn.setPointerCapture(e.pointerId); } catch(_){}
   jumpTouch = true; jBtn.classList.add('down');
-  if (state === 'play' && !editing) pressJump();
+  if (state === 'play' && !editing) pressJump(true);
 });
-const jEnd = ()=>{ if (!jumpTouch) return; jumpTouch = false; jBtn.classList.remove('down'); releaseJump(); };
+const jEnd = e=>{ if (e && e.pointerId !== jumpPid) return; if (!jumpTouch) return; jumpPid = null; jumpTouch = false; jBtn.classList.remove('down'); releaseJump(); };
 jBtn.addEventListener('pointerup', jEnd);
 jBtn.addEventListener('pointercancel', jEnd);
 jBtn.addEventListener('lostpointercapture', jEnd);
 function clearInput(){
   for (const k in keys) keys[k]=false;
-  jumpBuf=0;
+  jumpBuf=0; bufferedTouchJump=false;
   endMove(); jEnd(); releaseJump();
 }
 
@@ -354,7 +363,7 @@ $('edUndo').addEventListener('click', ()=> undo());
 const eBtn = $('btnEdit');
 eBtn.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
-  if (state !== 'play' || menuOpen) return;
+  if (state !== 'play' || menuOpen || bookOpen) return;
   eBtn.classList.add('down');
   if (editing) closeEditor(); else openEditor();
 });
@@ -426,7 +435,7 @@ const LEVELS = [
   {
     name:'壹 · 缝隙', sub:'削扁自己', theme:'violet',
     hint:'<b>点击身体</b>削掉格子 —— 削扁了才钻得进墙缝　·　<b>点击空位</b>贴回去　·　A D 移动 / 空格 跳　·　<b>E</b> 改造面板',
-    hintTouch:'点<b>改</b>(或直接点自己身体)削掉格子 —— 削扁了才钻得进墙缝',
+    hintTouch:'点<b>豆板</b>，用<b>瘦身钻洞</b>；更窄的缝可以<b>再瘦一层</b>',
     start:[6,37],
     rects:[
       {x:0,y:40,w:80,h:4,t:'stone'},
@@ -673,7 +682,7 @@ function updateDevices(dt){
     d.x = lerp(d.startX,d.toX*CELL,t); d.y = lerp(d.startY,d.toY*CELL,t);
     if (riding){
       tryMoveX(d.x-oldX); tryMoveY(d.y-oldY);
-      P.onGround = true; P.coyote = 0.1;
+      P.onGround = true; P.coyote = 0.14;
     }
   }
 }
@@ -690,7 +699,7 @@ function respawnCheckpoint(){
   if (!saved) return;
   checkpoint = saved;
   P.mask.set(saved.mask); P.bag = Object.assign({},saved.bag); P.sel = saved.sel;
-  P.px=saved.px; P.py=saved.py; P.vx=P.vy=0; P.invuln=1.5; jumpBuf=0;
+  P.px=saved.px; P.py=saved.py; P.vx=P.vy=0; P.invuln=1.5; jumpBuf=0; P.touchFlight=false;
   grid.set(saved.grid); tilesDirty=true;
   devices=saved.devices.map(d=>Object.assign({},d)); seeds=saved.seeds.map(s=>Object.assign({},s));
   items=saved.items.map(i=>Object.assign({},i)); enemies=saved.enemies.map(e=>Object.assign({},e));
@@ -803,10 +812,12 @@ function interactDevices(dt){
   for (const s of seeds){
     if (!s.got && rectOverlap(b,{x:s.x-5,y:s.y-6,w:10,h:12})){
       s.got=true;
+      const newPaper=beadBook.collect(level,seeds.indexOf(s));
+      if(newPaper.length)toast('新图纸「'+newPaper.join('、')+'」解锁了，去拼豆图册看看');
       const n=seeds.filter(s=>s.got).length;
       burst(s.x,s.y,'#ffe9a3',18,125,2); tone(660+n*100,1000+n*130,0.12,'triangle',0.06);
       floater(s.x,s.y-10,'✦ '+n+'/'+seeds.length,'#fff0ae');
-      if (n===seeds.length) toast('光种收齐了!');
+      if (n===seeds.length&&!newPaper.length) toast('光种收齐了！暂停里打开拼豆图册');
     }
   }
   // 收集与战斗结算后再存档,避免复活时复制材料;仅在安全站稳时激活。
@@ -998,7 +1009,7 @@ const P = {
   invuln:0, denyT:0, flash:0, shake:0,
   eyeT:0, blink:0,
   burnT:0, evapT:0, lavaT:0, crumbleT:0,
-  bornT:0, springFlight:false,
+  bornT:0, springFlight:false, touchFlight:false,
   sx:1, sy:1, svx:0, svy:0,           // 挤压拉伸(弹簧)
   dustT:0, airT:0, lastVy:0, beatT:0, hurtFace:0,
   kbT:0, kbV:0,                       // 击退:短时间内覆盖输入
@@ -1032,7 +1043,7 @@ function spawnPlayer(sx,sy){
   P.px = sx*CELL - 2*CELL;
   P.py = sy*CELL - 2*CELL;
   P.vx = P.vy = 0; P.onGround = false; P.coyote = 0; P.face = 1;
-  P.invuln = 0; P.denyT = 0; P.flash = 0; P.crumbleT = 0; P.bornT = 0.5; P.springFlight=false;
+  P.invuln = 0; P.denyT = 0; P.flash = 0; P.crumbleT = 0; P.bornT = 0.5; P.springFlight=false; P.touchFlight=false;
   P.burnT = 0; P.evapT = 0; P.lavaT = 0; P.shake = 0;
   P.sx = P.sy = 1; P.svx = P.svy = 0; P.airT = 0; P.hurtFace = 0; P.kbT = 0; P.kbV = 0;
 }
@@ -1068,7 +1079,14 @@ function tryMoveY(dist){
     const lift = st > 0 && devices.find(d=>(d.type === 'lift' || (d.type === 'vine' && d.grown)) && x+w>d.x+0.1 && x<d.x+d.w-0.1 &&
       y+h<=d.y+0.01 && y+h+st>=d.y);
     if (lift){ y = lift.y-h; blocked = true; landedLift = true; break; }
-    if (boxSolid(x, y+st, w, h)) { blocked = true; break; }
+    if (boxSolid(x, y+st, w, h)) {
+      let shift=0;
+      if(st<0)for(let d=1;d<=3&&!shift;d++)for(const side of [-1,1]){
+        if(!boxSolid(x+side*d,y,w,h)&&!boxSolid(x+side*d,y+st,w,h)){shift=side*d;break;}
+      }
+      if(shift){x+=shift;P.px+=shift;}
+      else {blocked = true;break;}
+    }
     y += st;
   }
   if (blocked && !landedLift){
@@ -1310,7 +1328,7 @@ function syncUndo(){
   if (b2) b2.disabled = !has;
 }
 function undo(){
-  if (state !== 'play' || menuOpen) return;
+  if (state !== 'play' || menuOpen || bookOpen) return;
   while (hist.length){
     const op = hist.pop(), k = op.j*MW + op.i, m = MAT[op.m];
     let ok = false;
@@ -1381,7 +1399,7 @@ const edEl = $('editor'), edCv = $('edCv'), edx = edCv.getContext('2d');
 edx.imageSmoothingEnabled = false;
 const ED = 32; // 每格 32px
 function openEditor(){
-  if (state !== 'play' || editing || menuOpen) return;
+  if (state !== 'play' || editing || menuOpen || bookOpen) return;
   editing = true; edEl.classList.remove('hide');
   clearInput();
   tone(500,700,0.06,'triangle',0.04);
@@ -1391,6 +1409,37 @@ function closeEditor(silent){
   editing = false; edEl.classList.add('hide');
   if (!silent) tone(700,500,0.06,'triangle',0.04);
 }
+function quickBeads(action){
+  if (!editing || state !== 'play' || bookOpen) return false;
+  let changed=false;
+  if (action==='slim'){
+    const goal=bounds().h>CELL*2?CELL*2:CELL;
+    for(let pass=0;pass<MH;pass++){
+      const b=bounds();if(b.h<=goal)break;
+      let cut=false;
+      for(let i=b.i0;i<=b.i1;i++)if(P.mask[b.j0*MW+i]&&connectedWithout(i,b.j0)){removeAt(i,b.j0);cut=changed=true;}
+      if(!cut)break;
+    }
+    toast(changed?'收好豆子了，现在更矮、更轻':'已经很矮了，也可以逐颗调整');
+  }else if(action==='light'){
+    for(let pass=0;pass<MW*MH;pass++){
+      let cut=false;
+      for(let k=0;k<MW*MH;k++)if(P.mask[k]===MAT.stone.id&&connectedWithout(k%MW,k>>3)){removeAt(k%MW,k>>3);cut=changed=true;}
+      if(!cut)break;
+    }
+    toast(changed?'石豆已收回背包，跳得更高':'没有可直接取下的石豆，连接处请手动调整');
+  }else if(action==='attach'){
+    const b=bounds(),spots=[];
+    for(let j=0;j<MH;j++)for(let i=0;i<MW;i++)if(canPlace(i,j))spots.push({i,j,score:Math.abs(j-b.j1)*4+Math.abs(i-(b.i0+b.i1)/2)});
+    spots.sort((a,b)=>a.score-b.score);
+    if(spots.length)changed=placeAt(spots[0].i,spots[0].j);
+    else toast('周围被挡住了，先到宽敞一点的地方');
+  }
+  drawEditor();return changed;
+}
+$('edSlim').addEventListener('click',()=>quickBeads('slim'));
+$('edLight').addEventListener('click',()=>quickBeads('light'));
+$('edAttach').addEventListener('click',()=>quickBeads('attach'));
 $('edDone').addEventListener('click', ()=> closeEditor());
 edEl.addEventListener('pointerdown', e=>{ if (e.target === edEl) { e.preventDefault(); closeEditor(); } });
 edCv.addEventListener('contextmenu', e=> e.preventDefault());
@@ -1427,13 +1476,11 @@ function drawEditor(){
   for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
     const id = P.mask[j*MW+i]; if (!id) continue;
     const m = BY_ID[id], x = i*S, y = j*S;
-    edx.fillStyle = m.edge; edx.fillRect(x,y,S,S);
-    edx.fillStyle = m.c; edx.fillRect(x+2,y+2,S-4,S-4);
-    edx.fillStyle = m.c2; edx.fillRect(x+2,y+S-8,S-4,6);
-    edx.fillStyle = 'rgba(255,255,255,0.25)'; edx.fillRect(x+4,y+4,S-12,3);
-    edx.fillStyle = 'rgba(0,0,0,0.35)'; edx.font = '14px monospace'; edx.textAlign = 'center';
-    edx.fillText(m.label, x+S/2, y+S/2+5);
+    window.GraftBeads.drawBead(edx,x,y,S,id,false);
+    edx.fillStyle='#49354b';edx.font='9px sans-serif';edx.textAlign='center';
+    edx.fillText(m.label,x+S/2,y+S-3);
   }
+
   // 提示框
   const pulse = 0.55 + 0.35*Math.sin(time*6);
   for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
@@ -1454,15 +1501,18 @@ function drawEditor(){
       }
     }
   }
+  const height=bounds().h;
+  $('edSlim').textContent=height>CELL*2?'瘦身钻洞':height>CELL?'再瘦一层':'已是单层';
+  $('edSlim').disabled=height<=CELL;
   const w = weight();
-  $('edW').textContent = '重量 ' + w.toFixed(1) + (level === 1 || level === 4 ? (w >= 12.5 ? ' · 够压塌地板' : ' · 压塌地板要 12.5') : '');
+  $('edW').textContent = '跳高约 ' + (jumpPower()*jumpPower()/(2*GRAV*CELL)).toFixed(1) + ' 格 · 重 ' + w.toFixed(1) + (level === 1 || level === 4 ? (w >= 12.5 ? ' · 够压塌地板' : ' · 压塌地板要 12.5') : '');
 }
 
 // ─── 暂停菜单:继续 / 重来本关 / 选关 / 声音 / 回标题(手机上没有键盘,这是唯一的重开入口)
 const menuEl = $('pause');
 let menuOpen = false;
 function openMenu(){
-  if (state !== 'play' || menuOpen) return;
+  if (state !== 'play' || menuOpen || bookOpen) return;
   closeEditor(true);
   menuOpen = true; menuEl.classList.remove('hide');
   clearInput();
@@ -1511,12 +1561,12 @@ function tutStep(){
   if (level !== 0 || tutDone || state !== 'play' || editing || menuOpen) return null;
   const b = bounds(); if (b.empty) return null;
   const cx = (b.x + b.w/2)/CELL;
-  if (cx < 17 && tutCuts === 0) return {text: touchMode ? '按住左下的圆盘往右滑' : '按 D 往右走', arrow:true};
+  if (cx < 17 && tutCuts === 0) return {text: touchMode ? '按住左下的右箭头移动' : '按 D 往右走', arrow:true};
   if (cx < 31){
-    if (b.h > 16) return {text: tutCuts ? '继续削,矮到两格就钻得过去' : '点一下自己的身体,削掉一格', target: pickCut()};
+    if (b.h > 16) return {text: touchMode ? '点豆板 → 瘦身钻洞' : tutCuts ? '继续削,矮到两格就钻得过去' : '点一下自己的身体,削掉一格', target: pickCut()};
     return {text:'钻过去!', arrow:true};
   }
-  if (cx > 38 && cx < 47.5 && b.h > 8) return {text:'这道缝只有一格高 —— 削成一片', target: pickCut()};
+  if (cx > 38 && cx < 47.5 && b.h > 8) return {text:touchMode?'点豆板 → 再瘦一层':'这道缝只有一格高 —— 削成一片', target: pickCut()};
   return null;
 }
 function drawTutorial(){
@@ -1666,7 +1716,7 @@ function updatePlayer(dt){
           if (weight() > 12 && P.lastVy > 300) kick(3, 0, 1);
         }
       }
-      P.onGround = true; P.coyote = 0.1;
+      P.onGround = true; P.coyote = 0.14;
     }
     P.vy = 0;
   } else {
@@ -1686,15 +1736,16 @@ function updatePlayer(dt){
 
   jumpBuf = Math.max(0, jumpBuf - dt);
   if (jumpBuf > 0 && (P.onGround || P.coyote > 0)){
-    P.vy = -jumpPower();
+    P.vy = -jumpPower() - GRAV*dt*0.5;
+    P.touchFlight = bufferedTouchJump; bufferedTouchJump=false;
     P.onGround = false; P.coyote = 0; jumpBuf = 0;
     burst(b0.x+b0.w/2, b0.y+b0.h, '#9a92ad', 3, 50, 1);
     dust(b0.x+b0.w/2, b0.y+b0.h, -1, 2); dust(b0.x+b0.w/2, b0.y+b0.h, 1, 2);
     squash(0.78, 1.22);
     tone(250, 480, 0.09, 'square', 0.045);
   }
-  if (P.vy>=0) P.springFlight=false;
-  if (P.vy < 0 && !jumpHeld() && !P.springFlight) P.vy += GRAV*dt*0.55;
+  if (P.vy>=0) {P.springFlight=false;P.touchFlight=false;}
+  if (P.vy < 0 && !jumpHeld() && !P.springFlight && !P.touchFlight) P.vy += GRAV*dt*0.55;
 
   // 脆地板
   if (P.onGround){
@@ -2040,7 +2091,7 @@ function update(dt){
   music.intensity = (state === 'play' && (enemies.length > 0 || bounds().n <= 3)) ? 1 : 0;
 
   if (state === 'title' || state === 'win') { updateParticles(dt); return; }
-  if (editing || menuOpen) return;
+  if (editing || menuOpen || bookOpen) return;
   if (state === 'dead'){
     timer += dt;
     updateParticles(dt);
@@ -2544,6 +2595,8 @@ function drawPlayer(){
       const topOpen = !cellOf(i,j-1);
       if (topOpen){ ctx.fillStyle = 'rgba(255,255,255,0.24)'; ctx.fillRect(x+1,y,s-2,1); }
       cellTexture(id, x, y, i, j, topOpen);
+      ctx.fillStyle=m.edge;ctx.fillRect(x+3,y+3,2,2);
+      ctx.fillStyle='rgba(255,245,220,.65)';ctx.fillRect(x+2,y+2,2,1);
     }
   }
   // 轮廓
@@ -2559,6 +2612,10 @@ function drawPlayer(){
   }
 
   if(!born)drawExplorerFace(b,cellOf);
+  if(!born && beadBook.charm){
+    ctx.strokeStyle='#e4c49a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(b.x+b.w-1,b.y+b.h-7);ctx.lineTo(b.x+b.w+5,b.y+b.h-4);ctx.stroke();
+    ctx.drawImage(beadBook.charm,b.x+b.w+1,b.y+b.h-5,10,10);
+  }
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -2938,7 +2995,7 @@ function frame(t){
 }
 document.addEventListener('visibilitychange', ()=>{
   paused = document.hidden;
-  if (document.hidden){ clearInput(); if (AC) AC.suspend().catch(()=>{}); if (state === 'play' && !editing) openMenu(); }
+  if (document.hidden){ clearInput(); if (AC) AC.suspend().catch(()=>{}); if (state === 'play' && !editing && !bookOpen) openMenu(); }
   else if (AC && !muted) AC.resume().catch(()=>{});
 });
 // iOS 地址栏伸缩时 100vh 不可靠,用真实 innerHeight
@@ -2979,6 +3036,14 @@ function startGame(cont){
   stats.start = performance.now(); stats.deaths = 0;
   loadLevel(cont ? store.get('best', 0) : 0);
 }
+const beadBook=window.GraftBeads.create(store,{
+  open(){closeEditor(true);closeMenu(true);bookOpen=true;clearInput();document.body.classList.add('crafting');},
+  close(){bookOpen=false;clearInput();document.body.classList.remove('crafting');},
+  sound(){tone(610,820,.035,'triangle',.025);},
+  finish(){arp([523,659,784,1046],90);vibrate(25);},
+});
+$('btnBook').addEventListener('click',()=>beadBook.open());
+$('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
 $('btnCont').addEventListener('click', ()=> startGame(true));
 refreshContinue();
@@ -3016,7 +3081,7 @@ window.__game = {
   get cam(){ return cam; },
   key: (code, down)=>{ keys[code] = !!down; if (down && code === 'Space') pressJump(); if (!down && code === 'Space') releaseJump(); },
   step: (dt)=> update(dt),
-  render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
   get quality(){ return quality; },
 };
 /* @debug-end */

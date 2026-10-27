@@ -4,11 +4,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 echo "── 游戏:各关加载 / 自动通关 / 战斗"
 node --check src/game.js
+node --check src/beads.js
 node tests/smoke.js | tail -1
 node tests/playthrough.js
 node tests/combat.js
 node tests/undo.js
 node tests/editing.js
+node tests/beads.js
+node tests/jump-feel.js
 node tests/input-states.js
 node tests/grass.js
 node tests/lava.js

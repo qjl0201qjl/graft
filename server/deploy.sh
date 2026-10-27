@@ -46,6 +46,8 @@ deploy)
     node tests/smoke.js >/dev/null
     node tests/playthrough.js
     node tests/combat.js
+    node tests/beads.js
+    node tests/jump-feel.js
     node tests/adventure.js
     node tests/devices.js
     node tests/materials.js
