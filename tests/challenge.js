@@ -1,0 +1,30 @@
+const assert=require('node:assert/strict');
+const {boot}=require('./harness');
+for(const fps of [30,60,120]){
+ const {G}=boot();const step=n=>{for(let i=0;i<n;i++)G.step(1/fps)};
+ const stand=(cx,row)=>{const b=G.bounds();G.P.px+=cx*8-b.x-b.w/2;G.P.py+=row*8-b.y-b.h;G.P.vx=G.P.vy=0;G.P.invuln=0;};
+ G.loadLevel(8);step(fps/2);G.items().length=0;stand(44,28);
+ const plate=G.devices().find(d=>d.type==='plate'&&d.target==='b'),door=G.devices().find(d=>d.id==='b');
+ step(fps);assert(!door.open,'过轻不能打开校准门');
+ G.P.bag.stone=3;G.P.sel='stone';for(const p of [[5,4],[5,3],[5,2]])assert(G.placeAt(...p));
+ step(fps);assert(!door.open,'堆更多石头不能跳过配重谜题');
+ assert(G.removeAt(5,2));step(Math.floor(fps*.3));assert(plate.progress>0&&plate.progress<1);assert(!door.open);
+ const p=plate.progress;G.openEditor();step(fps);assert.equal(plate.progress,p,'豆板内配重计时暂停');G.closeEditor();
+ stand(36,40);step(2);assert.equal(plate.progress,0,'离开踏板后必须重新站稳');
+ stand(44,28);step(Math.ceil(fps*.8));assert(door.open);
+ G.removeAt(5,3);G.removeAt(5,4);step(fps/2);assert(door.open,'解开后永久开门，不强迫赶时间');
+}
+const {G}=boot();const step=n=>{for(let i=0;i<n;i++)G.step(1/60)};
+const stand=(cx,row)=>{const b=G.bounds();G.P.px+=cx*8-b.x-b.w/2;G.P.py+=row*8-b.y-b.h;G.P.vx=G.P.vy=0;G.P.invuln=0;};
+G.loadLevel(7);step(30);G.items().length=0;stand(45,23);
+G.P.bag.water=1;step(10);assert(!G.devices().find(d=>d.type==='relay').lit,'背包水不能点亮徽记');
+G.P.sel='water';assert(G.placeAt(1,3));step(5);assert(G.devices().find(d=>d.type==='relay').lit);
+assert(!G.devices().find(d=>d.type==='gate').open,'只有水没有草不能开门');
+stand(25,31);G.P.bag.grass=1;G.P.sel='grass';assert(G.placeAt(1,4));step(5);assert(G.devices().find(d=>d.type==='gate').open,'两层机关可以按玩家选择的顺序激活');
+G.loadLevel(11);step(30);G.items().length=0;stand(44,29);
+G.key('KeyD',true);step(60);G.key('KeyD',false);
+assert(G.bounds().x+G.bounds().w<=46*8+.1,'三格身体被低顶挡住');
+G.openEditor();assert(G.quickBeads('slim'));G.closeEditor();
+G.key('KeyD',true);for(let i=0;i<60&&(G.bounds().x+G.bounds().w/2)<50*8;i++)step(1);G.key('KeyD',false);
+assert(G.bounds().x+G.bounds().w/2>=50*8,'改成两格可以穿过窄道');
+console.log('PASS 配重上下限、站稳与离台重置、暂停、永久开门、跨层双材料联动、终关改形窄道');

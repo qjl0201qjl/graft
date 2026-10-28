@@ -44,7 +44,7 @@ function boot(opts){
   };
   const win = {
     document, navigator:{ maxTouchPoints: opts.touch ? 5 : 0, vibrate(){} },
-    innerHeight: 800, innerWidth: 1280,
+    innerHeight: opts.height || 800, innerWidth: opts.width || 1280,
     location:{ search: opts.search || '', reload(){} },
     localStorage:{ getItem:k=> ls.has(k)?ls.get(k):null, setItem:(k,v)=>ls.set(k,String(v)), removeItem:k=>ls.delete(k) },
     matchMedia:()=>({matches: !!opts.touch}),
@@ -59,6 +59,7 @@ function boot(opts){
   const file = opts.file || path.join(__dirname, '..', 'src', 'game.js');
   vm.createContext(win);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'beads.js'), 'utf8'), win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'harbor.js'), 'utf8'), win);
   vm.runInContext(fs.readFileSync(file, 'utf8'), win, { filename:'game.js' });
   return { G: win.__game, els, win };
 }

@@ -15,7 +15,7 @@ G.loadLevel(8);step(30);G.items().length=0;stand(20,40);
 G.P.bag.stone=2;G.P.sel='stone';assert(G.placeAt(5,4));assert(G.placeAt(5,3));step(3);
 assert(G.devices().find(d=>d.type==='gate'&&d.id==='a').open);
 assert(!G.devices().find(d=>d.type==='gate'&&d.id==='b').open,'底层踏板不会打开上层门');
-stand(44,28);step(3);assert(G.devices().find(d=>d.type==='gate'&&d.id==='b').open);
+stand(44,28);step(3);assert(!G.devices().find(d=>d.type==='gate'&&d.id==='b').open,'校准踏板需要站稳');step(50);assert(G.devices().find(d=>d.type==='gate'&&d.id==='b').open);
 G.loadLevel(9);step(30);G.items().length=0;stand(34,29);G.P.bag.water=5;step(3);
 assert(!G.devices().find(d=>d.id==='tide').open,'库存水不能代替上层共鸣');
 G.P.sel='water';assert(G.placeAt(1,3));const n=G.P.mask.filter(x=>x===4).length;step(3);
