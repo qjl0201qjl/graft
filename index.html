@@ -22,7 +22,7 @@
     <canvas id="cv" width="640" height="360"></canvas>
     <div id="hud">
       <div class="tl">拾色 <b>GRAFT</b></div>
-      <div class="tr"><span id="wbar" title="重量:越重跳得越低,12.5 以上能压塌脆地板"><b>W</b><span class="tk"><i></i><em></em></span></span><span id="seedCount" aria-label="本关光种"></span><span id="lv"></span>
+      <div class="tr"><span id="wbar" title="重量越大，跳得越低"><b>重</b><span id="wValue"></span><span class="tk"><i></i><em></em></span></span><span id="seedCount" aria-label="本关光种"></span><span id="lv"></span>
         <button class="ibtn" id="btnPause" type="button" aria-label="暂停">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10"/></svg>
         </button>
@@ -34,7 +34,6 @@
         </button>
       </div>
       <div id="bag"></div>
-      <div id="hint"></div>
       <div id="toast"></div>
       <div id="card"><div class="cn"></div><div class="cs"></div></div>
     </div>
@@ -47,15 +46,17 @@
         <div class="ed-quick"><button id="edSlim" type="button">瘦身钻洞</button><button id="edLight" type="button">收回石豆</button><button id="edAttach" type="button">贴一颗所选豆</button></div>
         <div id="edMatHint" class="ed-material" aria-live="polite"></div>
         <div class="ed-tip">点<b>空位</b>贴上所选材料 · 点<b>身体</b>削下一格<br><i class="lg ok"></i>可贴　<i class="lg cut"></i>可削　<i class="lg no"></i>被墙挡住</div>
-        <div class="ed-row"><button id="edUndo" class="btn" type="button" disabled>撤　销</button><button id="edDone" class="btn primary" type="button">完　成</button></div>
+        <div class="ed-row"><button id="edUndo" class="btn" type="button" disabled>撤　销</button><button id="edDone" class="btn primary" type="button">改好了，去试试</button></div>
       </div>
     </div>
 
     <div id="pause" class="hide" role="dialog" aria-label="暂停">
       <div class="pm-panel">
         <div class="pm-head">暂　停<small id="pmLevel"></small></div>
+        <div class="route-advice"><strong id="pmGoal"></strong><p id="pmAdvice"></p><details><summary>看看本关完整玩法</summary><p id="pmPlan"></p></details></div>
         <button id="pmResume" class="btn primary" type="button">继续</button>
         <button id="pmRetry" class="btn" type="button">重来本关</button>
+        <button id="pmHarbor" class="btn" type="button">去豆岛打捞</button>
         <button id="pmBook" class="btn" type="button">拼豆图册</button>
         <div class="pm-sub">选关</div>
         <div id="pmLevels"></div>
@@ -76,22 +77,24 @@
       <canvas id="portraitCv" width="240" height="116" aria-label="戴护目镜的拼装小探险家"></canvas>
       <div class="logo">拾色</div>
       <div class="sub">拼出自己的冒险</div>
-      <div class="journey-note">捡光种 · 拼挂件 · 带着作品去冒险</div>
+      <div class="journey-note">点三颗同色豆 · 拼作品 · 建自己的豆岛</div>
       <div class="menu">
-        <button class="btn primary" id="btnStart" type="button">开始游戏</button>
+        <button class="btn primary" id="btnHarbor" type="button">打捞拼豆</button>
+        <button class="btn" id="btnStart" type="button">遗迹闯关</button>
         <button class="btn" id="btnCont" type="button"></button>
         <button class="btn" id="btnPick" type="button">选关</button>
         <button class="btn" id="btnBook" type="button">拼豆图册</button>
       </div>
       <div class="keys desk">
-        <kbd>A</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳　点击身体削一格　点击空位贴一格<br>
-        <kbd>1</kbd>–<kbd>5</kbd> 选材料　<kbd>E</kbd> 改造面板　<kbd>Z</kbd> 撤销　<kbd>Esc</kbd> 暂停　<kbd>M</kbd> 静音
+        豆岛打捞：点三颗同色豆，自动拼作品，慢慢建起自己的岛<br>
+        遗迹闯关：<kbd>A</kbd><kbd>D</kbd> 移动 · <kbd>空格</kbd> 跳 · <kbd>E</kbd> 拼豆改造
       </div>
       <div class="keys ios" id="iosTip" hidden>iPhone:点 Safari 底部的 <b>分享</b> → <b>添加到主屏幕</b>,从桌面图标打开就是全屏</div>
-      <div class="keys touch">左下 <b>左右</b> 移动 · 右下轻点 <b>跳</b><br>点 <b>豆板</b> 暂停改造，瘦身、收石、贴功能豆</div>
+      <div class="keys touch">豆岛：<b>点同色豆 → 拼作品 → 建豆岛</b><br>遗迹闯关：左右移动 · 轻点跳 · 豆板改造</div>
     </div>
   </div>
 
+  <div id="hint"><div><small>眼前这一步</small><strong id="stepGoal"></strong><span id="stepExtra"></span></div><button id="btnGuide" type="button" aria-label="查看过关提示">提示</button></div>
   <div id="pad">
     <div id="move"><button type="button" class="direction" aria-label="向左移动">◀</button><span class="ar l"></span><span class="knob"></span><span class="ar r"></span><button type="button" class="direction" aria-label="向右移动">▶</button></div>
     <div class="rbtns">
@@ -101,6 +104,29 @@
     </div>
   </div>
   <div id="rotate">横过来玩更爽 ↻</div>
+  <section id="stageClear" class="hide" role="dialog" aria-modal="true" aria-labelledby="clearHeading">
+    <div class="clear-sheet">
+      <small class="clear-eyebrow" id="clearChapter"></small>
+      <h1 id="clearHeading">又走通了一条路</h1>
+      <p id="clearSkill" class="clear-skill"></p>
+      <div id="clearTrail" aria-label="关卡足迹"></div>
+      <div class="clear-results"><div><strong id="clearSeeds"></strong><span>本次找到的光种</span></div><div><strong id="clearBest"></strong><span id="clearBestLabel"></span></div></div>
+      <p id="clearPraise" role="status"></p>
+      <div class="clear-craft"><span>带走一件冒险纪念品</span><strong id="clearReward"></strong><button id="clearBook" type="button">去拼豆</button></div>
+      <p id="clearNextTease"></p>
+      <div class="clear-actions"><button id="clearRetry" class="btn" type="button">再探索一次</button><button id="clearNext" class="btn primary" type="button">去下一关 →</button></div>
+    </div>
+  </section>
+  <section id="harbor" class="hide" role="dialog" aria-modal="true" aria-labelledby="harborHeading">
+    <div class="harbor-shell">
+      <header class="harbor-head"><div><small>拾色 · 一颗颗建起自己的岛</small><h1 id="harborHeading">豆岛打捞</h1></div><button id="harborClose" type="button" aria-label="离开豆岛">返回</button></header>
+      <div class="harbor-island"><strong id="harborGrowth"></strong><canvas id="harborIsland" width="600" height="100" aria-label="我的豆岛作品展台"></canvas><nav id="harborChapters" aria-label="选择作品关卡"></nav></div>
+      <div class="harbor-play">
+        <div class="harbor-project"><div class="harbor-target"><div><strong id="harborStage"></strong><p id="harborRule"></p></div><span id="harborProgress"></span></div><canvas id="harborPattern" width="160" height="160" aria-label="当前自动拼豆进度"></canvas><div class="harbor-meter"><i id="harborMeter"></i></div><p class="harbor-project-note">成组的豆子会自动拼进这里<br>完成后装点豆岛，也能戴回闯关</p></div>
+        <div class="harbor-controls"><p id="harborMessage" role="status">点 3 颗同色豆 → 自动拼进图纸</p><div id="harborPool" aria-label="选择要打捞的豆子"></div><div id="harborBasket"><div class="harbor-basket-title"><strong>六格小篮</strong><span id="harborCount"></span></div><div id="harborTray" aria-label="暂存的豆子"></div></div><div class="harbor-tools"><button id="harborUndo" type="button">撤回一步</button><button id="harborHint" type="button">给个提示</button><button id="harborRestart" type="button">重试本件</button></div><div id="harborResult" class="hide"><strong>新作品，上岛啦！</strong><div><button id="harborWear" type="button">看看成品</button><button id="harborNext" type="button">下一件</button></div></div></div>
+      </div>
+    </div>
+  </section>
   <section id="beadBook" class="hide" role="dialog" aria-modal="true" aria-labelledby="bookHeading">
     <div class="book-shell">
       <header class="book-head"><div><small>拾色 · 拼豆工坊</small><h1 id="bookHeading">把冒险，一颗颗留下来</h1><p id="bookGoal"></p></div><button id="bookClose" type="button" aria-label="关闭拼豆图册">返回</button></header>
@@ -113,6 +139,7 @@
   </section>
 </div>
 <script src="src/beads.js"></script>
+<script src="src/harbor.js"></script>
 <script src="src/game.js"></script>
 </body>
 </html>

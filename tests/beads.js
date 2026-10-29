@@ -13,7 +13,7 @@ book.select(4);assert(book.paint(3,0));book.close();G.step(1/60);assert.equal(G.
 const saved=JSON.parse(win.localStorage.getItem('graft.beadBook'));assert.equal(saved.drafts.drop[3],4);assert(saved.done.includes('sprout'));
 // 使用同一个存储重新创建图册，验证刷新恢复而不是只检查内存。
 const store={get(k,d){const s=win.localStorage.getItem('graft.'+k);return s===null?d:JSON.parse(s)},set(k,v){win.localStorage.setItem('graft.'+k,JSON.stringify(v))}};
-const restored=win.GraftBeads.create(store,{open(){},close(){},sound(){},finish(){}});assert.equal(restored.worn,'sprout');assert.equal(restored.total(),2);assert(restored.choose(1));assert.equal(restored.counts().count,1);
+const restored=win.GraftBeads.create(store,{levelCount:()=>G.LEVELS.length,open(){},close(){},sound(){},finish(){}});assert.equal(restored.worn,'sprout');assert.equal(restored.total(),2);assert(restored.choose(1));assert.equal(restored.counts().count,1);
 G.loadLevel(0);for(let i=0;i<30;i++)G.step(1/60);G.openEditor();const total=()=>G.P.mask.reduce((n,v)=>n+!!v,0)+Object.values(G.P.bag).reduce((a,b)=>a+b,0);const before=total();assert(G.quickBeads('slim'));assert(G.bounds().h<=16);assert(G.quickBeads('slim'));assert.equal(G.bounds().h,8,'第二次瘦身能通过单层缝');assert.equal(total(),before);
 G.P.sel='meat';assert(G.quickBeads('attach'));assert.equal(total(),before);G.P.sel='water';assert.equal(G.quickBeads('attach'),false);assert.equal(G.P.bag.water,0);
 G.P.bag.stone=2;G.P.sel='stone';assert(G.quickBeads('attach'));assert(G.quickBeads('attach'));const stoneTotal=total();assert(G.quickBeads('light'));assert.equal(G.P.bag.stone,2);assert.equal(total(),stoneTotal);

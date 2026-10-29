@@ -29,7 +29,7 @@ function setTouchMode(on){
   document.body.classList.toggle('touch', !!on);
   touchMode = !!on;
   if (typeof applyViewMode === 'function' && vignette) applyViewMode();
-  if (state === 'play') document.getElementById('hint').innerHTML = levelHint();
+  if (state === 'play') refreshJourney();
 }
 let touchMode = false;
 
@@ -229,11 +229,16 @@ function jumpHeld(){ return !!keys['Space']; }
 
 addEventListener('keydown', e=>{
   if (bookOpen) return;
+  // 原生按钮自行处理 Enter / Space 和焦点移动，不再触发全局跳跃或关闭豆板。
+  if(e.target && e.target.tagName==='BUTTON' && ['Enter','Space','Tab'].includes(e.code))return;
   if (e.repeat) { if(['Space','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); return; }
   keys[e.code] = true;
   if (['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab'].includes(e.code)) e.preventDefault();
-  if (state === 'title') { if (e.code === 'Space' || e.code === 'Enter') startGame(false); return; }
-  if (state === 'win') return;
+  if (state === 'title') { if (e.code === 'Space' || e.code === 'Enter') harbor.open(); return; }
+  if (state === 'win' || state === 'clear') {
+    if (e.code === 'Enter' && (!e.target || e.target.tagName!=='BUTTON')) {e.preventDefault();continueJourney();}
+    return;
+  }
   if (menuOpen){ if (e.code === 'Escape' || e.code === 'KeyP') closeMenu(); return; }
   if (e.code === 'KeyZ' || e.code === 'Backspace') { undo(); return; }
   if (editing){
@@ -305,6 +310,7 @@ cv.addEventListener('wheel', e=>{
 // ─── 触屏手柄
 const moveEl = $('move'), knob = moveEl.querySelector('.knob');
 const arL = moveEl.querySelector('.ar.l'), arR = moveEl.querySelector('.ar.r');
+const moveButtons=moveEl.querySelectorAll('.direction');
 let movePid = null, jumpTouch = false, jumpPid = null;
 function updMove(e){
   const r = moveEl.getBoundingClientRect();
@@ -315,10 +321,12 @@ function updMove(e){
   knob.style.transform = 'translateX('+kx.toFixed(1)+'px)';
   arL.classList.toggle('lit', touchDir < 0);
   arR.classList.toggle('lit', touchDir > 0);
+  moveButtons.forEach((button,i)=>button.classList.toggle('down',touchDir===(i===0?-1:1)));
 }
 function endMove(){
   movePid = null; touchDir = 0; knob.style.transform = '';
   arL.classList.remove('lit'); arR.classList.remove('lit');
+  moveButtons.forEach(button=>button.classList.remove('down'));
 }
 moveEl.addEventListener('pointerdown', e=>{
   e.preventDefault(); ac();
@@ -329,7 +337,7 @@ moveEl.addEventListener('pointerdown', e=>{
 });
 moveEl.addEventListener('pointermove', e=>{ if (e.pointerId === movePid) updMove(e); });
 moveEl.addEventListener('pointerup', e=>{ if (e.pointerId === movePid) endMove(); });
-moveEl.querySelectorAll('.direction').forEach((button,i)=>{
+moveButtons.forEach((button,i)=>{
   button.addEventListener('keydown',e=>{if(e.code!=='Space'&&e.code!=='Enter')return;e.preventDefault();e.stopPropagation();if(state==='play'&&!editing&&!menuOpen&&!bookOpen)touchDir=i===0?-1:1;});
   button.addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();e.stopPropagation();endMove();}});
   button.addEventListener('blur',endMove);
@@ -358,17 +366,14 @@ function clearInput(){
 }
 
 const uBtn = $('btnUndo');
-uBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); ac(); if (!editing && !menuOpen) undo(); });
+uBtn.addEventListener('click', ()=>{ ac(); if (!editing && !menuOpen) undo(); });
 $('edUndo').addEventListener('click', ()=> undo());
 const eBtn = $('btnEdit');
-eBtn.addEventListener('pointerdown', e=>{
-  e.preventDefault(); ac();
+eBtn.addEventListener('click', ()=>{
+  ac();
   if (state !== 'play' || menuOpen || bookOpen) return;
-  eBtn.classList.add('down');
   if (editing) closeEditor(); else openEditor();
 });
-eBtn.addEventListener('pointerup', ()=> eBtn.classList.remove('down'));
-eBtn.addEventListener('pointercancel', ()=> eBtn.classList.remove('down'));
 
 // 第一次真实触摸时切到触屏模式;用鼠标点画面时切回来
 addEventListener('touchstart', ()=>{ if (!touchMode) setTouchMode(true); }, {passive:true});
@@ -565,20 +570,22 @@ const LEVELS = [
   },
   {
     name:'捌 · 草醒森林', sub:'草唤醒植物', theme:'fungal',
-    hint:'先把草贴在身上,靠近灰色蘑菇把它唤醒,踩上就弹!绿色种芽还能长出藤蔓踏板',
+    hint:'先带草唤醒蘑菇和种芽；第一层右端取水，再到第二层点亮蓝色共鸣柱。草、水两枚徽记一起开门',
     start:[5,37],
     rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:19,y:31,w:16,h:1,t:'stone'},
            {x:38,y:23,w:18,h:1,t:'stone'}, {x:60,y:15,w:19,h:1,t:'stone'}],
     devices:[{type:'spring',x:11,y:40,w:4,power:560,needs:'grass'}, {type:'spring',x:29,y:31,w:4,power:560,needs:'grass'},
              {type:'spring',x:51,y:23,w:4,power:560,needs:'grass'}, {type:'checkpoint',x:22,y:31},
              {type:'checkpoint',x:42,y:23}, {type:'bud',x:25,y:31,target:'forest'},
-             {type:'vine',x:35,y:31,w:4,id:'forest'}],
-    seeds:[[36,28],[40,20],[62,12]], items:[{c:[7,39],m:'grass'},{c:[25,30],m:'grass'}],
+             {type:'vine',x:35,y:31,w:4,id:'forest'},
+             {type:'relay',x:45,y:23,mat:'water',target:'forest'},
+             {type:'gate',x:59,y:1,w:1,h:39,id:'forest'}],
+    seeds:[[36,28],[40,20],[62,12]], items:[{c:[7,39],m:'grass'},{c:[25,30],m:'grass'},{c:[34,30],m:'water'}],
     enemies:[], exit:[74,12,3,3],
   },
   {
     name:'玖 · 石头的开关', sub:'先变重,再搭车', theme:'frost',
-    hint:'先重装开第一道门,收石头搭浮台 · 中层再重装踩亮第二踏板,再轻装登顶;两道门永久锁定',
+    hint:'底层重装开门，收石搭浮台；中层踏板要求重量 12.5–15.5，站稳 0.7 秒才能点亮。太重就收回一点，再轻装登顶',
     start:[5,37],
     rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:38,y:28,w:11,h:1,t:'stone'},
            {x:65,y:19,w:14,h:1,t:'stone'}],
@@ -586,7 +593,7 @@ const LEVELS = [
              {type:'gate',x:28,y:22,w:2,h:18,id:'a'},
              {type:'lift',x:31,y:40,toX:31,toY:28,w:5,period:7},
              {type:'lift',x:51,y:28,toX:55,toY:19,w:8,period:7},
-             {type:'checkpoint',x:40,y:28}, {type:'plate',x:42,y:28,w:5,weight:12.5,target:'b'},
+             {type:'checkpoint',x:40,y:28}, {type:'plate',x:42,y:28,w:5,weight:12.5,maxWeight:15.5,hold:0.7,target:'b'},
              {type:'gate',x:64,y:1,w:1,h:39,id:'b'}],
     seeds:[[11,34],[44,24],[59,16]],
     items:[{c:[9,39],m:'stone'},{c:[12,39],m:'stone'},{c:[15,39],m:'stone'}],
@@ -605,10 +612,10 @@ const LEVELS = [
              {type:'valve',x:19,y:40,target:'water-jet'}, {type:'emberwall',x:64,y:22,w:2,h:18},
              {type:'relay',x:34,y:29,mat:'water',target:'tide'},
              {type:'gate',x:70,y:1,w:1,h:39,id:'tide'}],
-    seeds:[[21,30],[34,26],[60,30]],
+    seeds:[[21,30],[37,23],[60,30]],
     items:[{c:[9,39],m:'water'},{c:[12,39],m:'water'},{c:[15,39],m:'water'},
            {c:[34,28],m:'water'},{c:[35,28],m:'water'},{c:[34,39],m:'water'},{c:[51,39],m:'water'},{c:[61,39],m:'water'},{c:[62,39],m:'water'}],
-    enemies:[{c:[69,37],w:3,h:3,m:'meat',speed:44}],exit:[75,37,3,3],
+    enemies:[{c:[72,37],w:3,h:3,m:'meat',speed:44}],exit:[75,37,3,3],
   },
   {
     name:'拾壹 · 火开荆途', sub:'带火烧出一条路', theme:'dusk',
@@ -629,21 +636,26 @@ const LEVELS = [
   },
   {
     name:'拾贰 · 洞穴游乐场', sub:'把学会的,玩出来', theme:'violet',
-    hint:'石压开关 → 水冷却红门 → 火烧荆棘 → 草唤醒顶层蘑菇 · 四种材料,都要贴上身才有用!',
+    hint:'先把重量调到 12.5–15.5 压开门，再水冷却、火烧路。中层保留火点灯，削到两格穿窄道，再带水点亮另一枚徽记；最后带草登顶',
     start:[5,37],
     rects:[{x:0,y:40,w:80,h:4,t:'stone'}, {x:39,y:29,w:12,h:1,t:'stone'},
-           {x:67,y:17,w:12,h:1,t:'stone'}, {x:75,y:9,w:4,h:1,t:'stone'}],
-    devices:[{type:'plate',x:15,y:40,w:5,weight:12.5,target:'final'},
+           {x:67,y:17,w:12,h:1,t:'stone'}, {x:75,y:9,w:4,h:1,t:'stone'},
+           {x:46,y:21,w:3,h:6,t:'stone'}],
+    devices:[{type:'plate',x:15,y:40,w:5,weight:12.5,maxWeight:15.5,hold:0.7,target:'final'},
              {type:'gate',x:23,y:20,w:2,h:20,id:'final'},
              {type:'emberwall',x:27,y:20,w:1,h:20},
              {type:'bramble',x:31,y:20,w:1,h:20},
              {type:'spring',x:36,y:40,w:3,power:510},
-             {type:'checkpoint',x:42,y:29},
+             {type:'checkpoint',x:40,y:29},
+             {type:'relay',x:43,y:29,mat:'fire',target:'crown'},
+             {type:'relay',x:49,y:29,mat:'water',target:'crown'},
+             {type:'gate',x:64,y:1,w:1,h:39,id:'crown'},
              {type:'lift',x:51,y:29,toX:57,toY:22,w:8,period:6.8},
              {type:'spring',x:70,y:17,w:4,power:440,needs:'grass'}],
-    seeds:[[18,33],[45,25],[73,8]],
+    seeds:[[18,33],[44,23],[73,8]],
     items:[{c:[8,39],m:'stone'},{c:[11,39],m:'stone'},{c:[13,39],m:'water'},
-           {c:[26,39],m:'water'},{c:[29,39],m:'fire'},{c:[30,39],m:'fire'},{c:[43,28],m:'grass'}],
+           {c:[26,39],m:'water'},{c:[29,39],m:'fire'},{c:[30,39],m:'fire'},
+           {c:[41,28],m:'fire'},{c:[43,28],m:'grass'},{c:[44,28],m:'water'}],
     enemies:[],exit:[76,6,3,3],
   },
   // ══════════ 试炼(比主线更紧:材料只够刚好,容错低) ══════════
@@ -730,9 +742,86 @@ const EARLY_SEEDS = [
   [[9,32],[42,20],[74,6]],
 ];
 EARLY_SEEDS.forEach((list,i)=>{ LEVELS[i].seeds=list; });
+// 通过第一次形状解谜后留一个歇脚点，后半段失败不用重复已经学会的动作。
+LEVELS[0].devices = [{type:'checkpoint',x:36,y:40}];
+LEVELS[4].devices = [{type:'checkpoint',x:40,y:40}];
+LEVELS[6].devices = [{type:'checkpoint',x:39,y:23}];
 function levelHint(){
   const L = LEVELS[level]; if (!L) return '';
   return (touchMode && L.hintTouch) ? L.hintTouch : (L.hint || '');
+}
+
+// 提示由当前身体、位置和机关决定；允许自由试路，不要求依次打勾。
+const JOURNEY_SKILLS = ['把身体变成钥匙','让重量帮你开路','用水保护自己','把硬材料放在接触面',
+  '按地形切换身体形状','在窄路里带好保护层','在轻装与重装间切换','借植物的力量登高',
+  '开门后卸重，搭浮台旅行','用水改变火焰路线','把两种材料组合起来','让四种材料接力开路'];
+const JOURNEY_TEASERS = ['缝隙会检验你的形状','下一关，重量也能变成开路工具。','下一关，水豆会替你挡住岩浆。',
+  '下一关，试试用身体的硬面迎战。','下一关，要先钻进去，再变重。','下一关，在低矮的火路里安排水豆。',
+  '下一关，在高低台阶间切换轻装与重装。','下一关，草豆能叫醒会弹跳的蘑菇。',
+  '下一关，开门后收回石豆，搭浮台上山。','下一关，水豆能关闭喷口、冷却红门。',
+  '下一关，火与草会一起打开新的道路。','最后一关，把四种材料的本领串起来。'];
+function routeStep(){
+  const b=bounds(), x=(b.x+b.w/2)/CELL, foot=(b.y+b.h)/CELL;
+  const step=(title,tip)=>({title,tip});
+  const exit=()=>step('走进发光的出口','光种是可选挑战。可以先过关，再回来试试高处和支路。');
+  const light=()=>step('轻装搭浮台，继续往上','开过的门不会关。豆板里收回石豆，等浮台靠近再跳上去。');
+  const stone=()=>{
+    const plate=devices.find(d=>d.type==='plate'&&!d.lit);
+    return plate&&plate.maxWeight?step('调好重量，在踏板上站稳','需要 '+plate.weight+'–'+plate.maxWeight+'；当前 '+weight().toFixed(1)+'。太重收石，太轻贴豆；站稳 '+plate.hold+' 秒让光条填满。'):
+      step('变重，踩开脚下的机关','需要重量 12.5；当前 '+weight().toFixed(1)+'。把石豆贴到身体上，太瘦时也可以贴回粉豆。');
+  };
+  const water=()=>step('把水豆贴在身体边缘','背包里的水不会挡火。在豆板边缘贴上多颗水豆，用掉后记得补上。');
+  switch(level){
+    case 0:
+      if(x<31)return step(b.h>16?'削到两格高，穿过第一道缝':'形状合适了，向右穿过墙缝',touchMode?'打开豆板点「瘦身钻洞」。削下来的豆子会回到背包。':'点击身体削掉上面一层，保留两格高；削下来的豆子会回到背包。');
+      if(x<51)return step(b.h>8?'再瘦一层，试试更窄的缝':'一格高也能前进，穿过去吧',touchMode?'豆板里点「再瘦一层」。右边高处的光种可以留待下次挑战。':'继续点击身体削掉一层，保留一格高。右边高处的光种可以留待下次挑战。');
+      return exit();
+    case 1: return stone();
+    case 2: if(x<56)return countMat('water')<2?water():step('带水向右，穿过岩浆','水会蒸发。保持前进，抵达右岸后再整理身体。');return exit();
+    case 3: return exitLocked?step('把石或火放在迎敌的一面','从上方踩下去也算接触。别用柔软的水豆迎敌，剩余对手 '+enemies.filter(e=>e.hp>0).length+' 个。'):exit();
+    case 4: return x<39?step('削成一格高，穿过长洞','豆板里连续瘦身两次，穿过去后再贴回身体和石豆。'):stone();
+    case 5: if(x<56)return b.h>16?step('削到两格高，再沿边缘贴水','先在豆板里瘦身；把水贴在两侧，保持两格高才能钻过低顶。'):countMat('water')<2?water():step('低头过火，持续向右走','穿过低顶后再跳上右岸，水豆消耗后可补在两侧。');return exit();
+    case 6: return exitLocked?step('改装迎敌，清出登顶的路','先用石或火解决地面上的对手。出口开启后收石，逐级跳上台阶。'):step('收回石豆，沿台阶登顶','轻一点跳得更高；在台阶边缘起跳。中途的青旗能保存进度。');
+    case 7:
+      if(foot>32)return step('带草踩蘑菇，让它送你上去','先把草豆贴上身，再踩到醒来的菇帽上。');
+      if(devices.some(d=>d.type==='bud'&&!d.lit))return step('带草靠近第一层的种芽','绿色徽记与上层的蓝色徽记共同控制终门。');
+      if(devices.some(d=>d.type==='relay'&&!d.lit))return step('取到水豆，到上层点亮蓝色徽记','水在第一层右端；把它贴上身，再乘蘑菇到第二层。只带草打不开终门。');
+      return foot>16?step('双徽记已亮，乘蘑菇登顶','也可以借藤蔓踏板去找支路光种。'):exit();
+    case 8:
+      if(devices.some(d=>d.type==='plate'&&!d.lit&&(d.target==='a'||foot<30)))return stone();
+      return foot>20?light():exit();
+    case 9:
+      if(devices.some(d=>d.type==='valve'&&!d.lit))return step('带水靠近第一个喷口开关','身上贴一颗可取下的水豆，靠近蓝色开关，喷口就会关闭。');
+      if(devices.some(d=>d.type==='relay'&&!d.lit))return step('带水登上中层，点亮蓝色柱子','从左边的小台阶往上跳。水必须贴在身上，柱子才会回应。');
+      if(devices.some(d=>d.type==='emberwall'&&!d.open))return step('补上水豆，冷却右侧红门','门会用掉一颗水。沿路补给可拾取；其余喷口等火焰停下再通过。');
+      return exit();
+    case 10:
+      if(x<28)return step('削到两格高，钻到荆棘前','先瘦身穿过低洞；洞口的火豆可以贴到身体外侧。');
+      if(devices.some(d=>d.type==='bramble'&&!d.open))return step('带火靠近荆棘，烧出道路','火豆必须贴上身，在荆棘旁稍等片刻；背包里的火不会烧路。');
+      if(devices.some(d=>d.type==='gate'&&!d.open))return step('登上中层，用草和火点亮两处机关','贴草靠近种芽，贴火靠近灯柱。两枚徽记都亮，门和藤蔓支路就通了。');
+      return foot>20?light():exit();
+    case 11:
+      if(devices.some(d=>d.type==='plate'&&!d.lit))return stone();
+      if(devices.some(d=>d.type==='emberwall'&&!d.open))return step('收石、贴水，冷却前方红门','豆板收回石豆，再贴水靠近红门。一颗水会被消耗。');
+      if(devices.some(d=>d.type==='bramble'&&!d.open))return step('换上火豆，烧开荆棘','门后的橙色豆子可以拾取。把火贴上身，再靠近荆棘。');
+      if(devices.some(d=>d.type==='relay'&&d.mat==='fire'&&!d.lit))return step('留住火豆，到中层点亮火徽记','乘蘑菇抵达中层，火除了烧路，还能点亮共鸣柱；中层也有火豆补给。');
+      if(devices.some(d=>d.type==='relay'&&d.mat==='water'&&!d.lit))return step('变成两格高，带水穿过窄道','点亮火徽记后再瘦身。把水贴在两侧，穿过低顶，到窄道另一侧点亮蓝色徽记。');
+      return foot>18?light():step('带草唤醒顶层蘑菇，跳向出口','中层能捡到草豆；贴上后踩顶层蘑菇，高处还藏着最后一颗光种。');
+    default:return exit();
+  }
+}
+function rewardNote(){
+  const total=beadBook.total(),completed=beadBook.completed;
+  const available=beadBook.patterns.filter(p=>p.need<=total&&!completed.includes(p.id));
+  if(available.length)return '可拼「'+available[available.length-1].name+'」· 已解锁 '+available.length+' 张待完成图纸';
+  const next=beadBook.patterns.find(p=>p.need>total&&!completed.includes(p.id));
+  return next?'再发现 '+(next.need-total)+' 颗光种，解锁「'+next.name+'」':'六张图纸都已完成，戴着作品继续探索';
+}
+function refreshJourney(){
+  const s=routeStep();
+  if($('stepGoal').textContent!==s.title)$('stepGoal').textContent=s.title;
+  const extra='可选探索 · '+rewardNote();
+  if($('stepExtra').textContent!==extra)$('stepExtra').textContent=extra;
 }
 
 // ═════════════════════════════════════════════ 洞穴机关:触碰即互动,不增加按键
@@ -771,9 +860,10 @@ function snapshotCheckpoint(index){
 }
 function respawnCheckpoint(){
   // 硬核模式:没有青旗,散架就从关卡开头重来
-  const saved = store.get('hard', false) ? null : checkpoint;
+  const hardMode = store.get('hard', false);
+  const saved = hardMode ? null : checkpoint;
   loadLevel(level,true);
-  if (!saved){ toast('硬核:从头再来'); return; }
+  if (!saved) { toast(hardMode ? '硬核:从头再来' : '再试一次 · '+(run.lastAdvice || routeStep().tip)); return; }
   checkpoint = saved;
   P.mask.set(saved.mask); P.bag = Object.assign({},saved.bag); P.sel = saved.sel;
   P.px=saved.px; P.py=saved.py; P.vx=P.vy=0; P.invuln=1.5; jumpBuf=0; P.touchFlight=false;
@@ -782,7 +872,10 @@ function respawnCheckpoint(){
   items=saved.items.map(i=>Object.assign({},i)); enemies=saved.enemies.map(e=>Object.assign({},e));
   exitLocked=saved.exitLocked; hist=[];
   camSnap(); syncBag(); syncUndo();
-  toast('从青旗继续');
+  toast('从青旗继续 · 已解锁的拼豆图纸和光种进度都还在');
+}
+function canConsumeMaterial(key){
+  return P.mask.some((id,k)=>id===MAT[key].id && connectedWithout(k%MW,Math.floor(k/MW)));
 }
 function consumeBodyMaterial(key){
   const id=MAT[key].id;
@@ -837,7 +930,9 @@ function interactMaterial(d,dt,b){
   }
   if((d.type==='emberwall' && !d.open || d.type==='valve' && !d.lit) && near && countMat('water')>0){
     d.progress=Math.min(1,d.progress+dt/0.4);
-    if(d.progress>=1 && consumeBodyMaterial('water')){
+    if(d.progress>=1 && !canConsumeMaterial('water')){
+      if(d.cd<=0){toast('把水贴到边缘 · 这颗水连着身体，消耗后会断开');d.cd=3;}
+    } else if(d.progress>=1 && consumeBodyMaterial('water')){
       d.open=true;d.lit=true;
       if(d.type==='valve'){
         for(const jet of devices)if(jet.type==='jet' && jet.id===d.target){jet.quenched=true;jet.active=false;jet.warning=false;}
@@ -862,14 +957,17 @@ function interactDevices(dt){
       burst(b.x+b.w/2,d.y-2,'#ffb2e7',12,110,2);
       tone(280,1100,0.16,'triangle',0.07); vibrate(15);
     }
-    if (d.type === 'plate' && !d.lit && onTop && P.onGround){
-      if (weight() >= d.weight){
+    if (d.type === 'plate' && !d.lit){
+      const onPlate=onTop && P.onGround, load=weight();
+      const fits=load>=d.weight && (!d.maxWeight || load<=d.maxWeight);
+      d.progress=onPlate&&fits?Math.min(1,d.progress+(d.hold?dt/d.hold:1)):0;
+      if (d.progress>=1){
         d.lit=true;
         refreshChannel(d.target);
         burst(d.x+d.w/2,d.y-3,'#ffe39a',12,100,2);
         toast('光门开了 · 踏板已锁定,可以收回石头'); arp([330,494,659],65);
-      } else if (d.cd<=0){
-        d.cd=2; floater(d.x+d.w/2,d.y-20,'贴石头 · 重量 ≥ '+d.weight,'#ffe39a');
+      } else if (onPlate && !fits && d.cd<=0){
+        d.cd=2; floater(d.x+d.w/2,d.y-20,d.maxWeight&&load>d.maxWeight?'太重了 · 收回一些豆子':'贴豆配重 · ≥ '+d.weight,'#ffe39a');
       }
     }
     if (d.type === 'jet' && d.active && d.cd<=0 && P.invuln<=0 && rectOverlap(b,{x:d.x,y:d.y-d.h,w:d.w,h:d.h})){
@@ -1021,7 +1119,8 @@ function drawDevices(){
     }
     if (d.type==='plate'){
       ctx.fillStyle=d.lit?'#fff3ae':'#99763d';ctx.fillRect(x,y-(d.lit?1:3),d.w,3);
-      ctx.fillStyle=d.lit?'#93ffd0':'#ffe39a';ctx.fillText(d.lit?'✓':'◆ '+d.weight,x+d.w/2,y-10);
+      ctx.fillStyle=d.lit?'#93ffd0':'#ffe39a';ctx.fillText(d.lit?'✓':'◆ '+d.weight+(d.maxWeight?'–'+d.maxWeight:''),x+d.w/2,y-10);
+      if(d.hold&&!d.lit){ctx.fillStyle='#514837';ctx.fillRect(x,y-6,d.w,2);ctx.fillStyle='#b7ebad';ctx.fillRect(x,y-6,d.w*d.progress,2);}
     }
     if(d.type==='relay'){
       const c=MAT[d.mat].c;
@@ -1262,7 +1361,7 @@ function floater(x,y,text,color){
 function toast(t){
   const el = $('toast');
   el.textContent = t; el.style.opacity = 1;
-  clearTimeout(toast._t); toast._t = setTimeout(()=> el.style.opacity = 0, 900);
+  clearTimeout(toast._t); toast._t = setTimeout(()=> el.style.opacity = 0, clamp(t.length*85,1800,4800));
 }
 function showCard(name, sub){
   const el = $('card');
@@ -1276,10 +1375,17 @@ function showCard(name, sub){
 let level = 0, state = 'title', timer = 0, exitLocked = false, cleared = false, editing = false;
 let shake = 0, shakeX = 0, shakeY = 0, freeze = 0, time = 0, levelT = 0;
 const stats = { deaths: 0, start: 0 };
+let run = {level:-1,deaths:0,lastAdvice:''};
+let nextJourneyRefresh=0;
 
 function loadLevel(idx, retry){
   level = clamp(idx, 0, LEVELS.length-1);
   const L = LEVELS[level];
+  if(!retry || run.level!==level)run={level,deaths:0,lastAdvice:''};
+  $('stageClear').classList.add('hide');
+  $('wrap').inert=false;$('pad').inert=false;
+  document.body.classList.remove('celebrating');
+  clearInput();
   themeName = L.theme || 'violet'; TH = THEMES[themeName];
   checkpoint = null;
   loadDevices(L);
@@ -1313,7 +1419,7 @@ function loadLevel(idx, retry){
   state = 'play';
   timer = 0; shake = 0; freeze = 0; levelT = 0;
   $('lv').textContent = String(level+1).padStart(2,'0') + ' / ' + String(LEVELS.length).padStart(2,'0');
-  $('hint').innerHTML = levelHint();
+  refreshJourney();
   syncBag(); syncUndo();
   if (!retry){
     if (level > store.get('unlocked', 0)) store.set('unlocked', level);
@@ -1324,34 +1430,59 @@ function loadLevel(idx, retry){
 }
 
 function nextLevel(){
+  if(state!=='play')return;
+  const found=seeds.filter(s=>s.got).length;
   const bestSeeds = store.get('seeds', {});
-  bestSeeds[level] = Math.max(bestSeeds[level] || 0, seeds.filter(s=>s.got).length);
+  const previousSeeds=bestSeeds[level] || 0;
+  bestSeeds[level] = Math.max(previousSeeds, found);
   store.set('seeds', bestSeeds);
-  if (level+1 >= LEVELS.length){
-    state = 'win';
-    document.body.classList.add('menu');
-    store.set('best', 0);
-    const secs = Math.round((performance.now() - stats.start)/1000);
-    const ov = $('overlay');
-    ov.classList.remove('hide');
-    ov.querySelector('.logo').textContent = '通　关';
-    ov.querySelector('.logo').classList.add('small');
-    ov.querySelector('.sub').textContent = '你把自己捏成了想要的样子';
-    $('btnStart').textContent = '再玩一次';
-    $('btnCont').classList.add('hide');
-    const k = ov.querySelectorAll('.keys');
-    k.forEach(el => el.textContent = '');
-    k[0].textContent = '用时 ' + Math.floor(secs/60) + ' 分 ' + (secs%60) + ' 秒　·　散架 ' + stats.deaths + ' 次';
-    k[1].textContent = k[0].textContent;
-    arp([523,659,784,1046,1318], 110);
-    return;
-  }
-  state = 'clear'; timer = 0;
+  const records=store.get('journeyRecords',{}), old=records[level];
+  const improved=old && run.deaths<old.deaths;
+  records[level]={clears:(old?old.clears:0)+1,deaths:old?Math.min(old.deaths,run.deaths):run.deaths};
+  store.set('journeyRecords',records);
+  const final=level+1>=LEVELS.length;
+  store.set('unlocked',Math.max(store.get('unlocked',0),Math.min(level+1,LEVELS.length-1)));
+  store.set('best',final?0:Math.max(store.get('best',0),level+1));
+  state = final?'win':'clear'; timer = 0;
   closeEditor(true);
+  clearInput();
+  $('card').classList.remove('show');
+  $('clearChapter').textContent=LEVELS[level].name+' · '+(final?'旅途完成':'这一段，走通了');
+  $('clearHeading').textContent=final?'把学会的，都玩出来了':'又走通了一条路';
+  $('clearSkill').textContent='这一关的本领：'+JOURNEY_SKILLS[level];
+  $('clearSeeds').textContent='✦'.repeat(found)+'◇'.repeat(seeds.length-found);
+  $('clearSeeds').setAttribute('aria-label','本次光种 '+found+' / '+seeds.length+' 颗');
+  $('clearBest').textContent=bestSeeds[level]+'/'+seeds.length;
+  $('clearBestLabel').textContent='本关最佳收集';
+  $('clearPraise').textContent=found>previousSeeds&&old?'比上次多找到了 '+(found-previousSeeds)+' 颗光种！':
+    improved?'比之前少散架 '+(old.deaths-run.deaths)+' 次，走得更稳了。':
+    run.deaths===0?'这一次，全程没有散架。':old?'又走通了一次。试试换一种形状，找找另一条路。':'试过 '+run.deaths+' 次散架后，你还是找到了办法。';
+  $('clearReward').textContent=rewardNote();
+  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':JOURNEY_TEASERS[level+1];
+  $('clearNext').textContent=final?'回到标题':'去下一关 →';
+  const trail=$('clearTrail');trail.textContent='';
+  LEVELS.forEach((L,i)=>{const done=records[i]&&records[i].clears>0;const el=document.createElement('span');el.className='trail-bead'+(done?' done':'')+(i===level?' current':'');el.textContent=i+1;el.setAttribute('aria-label',L.name+(done?'，已完成':'，尚未完成'));trail.appendChild(el);});
+  $('stageClear').classList.remove('hide');
+  $('wrap').inert=true;$('pad').inert=true;
+  document.body.classList.add('celebrating');
+  $('clearNext').focus();
   arp([523,659,784,1046], 70);
   const b = bounds();
   for (let i=0;i<14;i++) burst(b.x+b.w/2, b.y+b.h/2, '#cbb6ff', 1, 120, 2);
 }
+function continueJourney(){
+  if(bookOpen || (state!=='clear'&&state!=='win'))return;
+  if(state==='win')showTitle();else loadLevel(level+1);
+}
+$('clearNext').addEventListener('click',continueJourney);
+$('clearRetry').addEventListener('click',()=>{if(!bookOpen&&(state==='clear'||state==='win'))loadLevel(level);});
+$('clearBook').addEventListener('click',()=>{if(state==='clear'||state==='win')beadBook.open();});
+$('stageClear').addEventListener('keydown',e=>{
+  if(e.key!=='Tab')return;
+  const first=$('clearBook'),last=$('clearNext');
+  if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+  else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+});
 
 // ═════════════════════════════════════════════ HUD
 const chips = {}, edChips = {};
@@ -1380,6 +1511,7 @@ function ensureSel(prefer){
 let lastBag = {};
 function syncBag(){
   $('edMatHint').textContent = MAT_HELP[P.sel];
+  syncQuickButtons();
   for (const k of ORDER){
     for (const set of [chips, edChips]){
       const el = set[k];
@@ -1401,7 +1533,7 @@ function pushHist(op){ hist.push(op); if (hist.length > 40) hist.shift(); syncUn
 function syncUndo(){
   const has = hist.length > 0 && state === 'play';
   const b1 = $('btnUndo'), b2 = $('edUndo');
-  if (b1) b1.classList.toggle('off', !has);
+  if (b1) {b1.classList.toggle('off', !has);b1.disabled=!has;}
   if (b2) b2.disabled = !has;
 }
 function undo(){
@@ -1475,16 +1607,33 @@ function nearestEditable(wx, wy){
 const edEl = $('editor'), edCv = $('edCv'), edx = edCv.getContext('2d');
 edx.imageSmoothingEnabled = false;
 const ED = 32; // 每格 32px
+let editSnapshot=null;
 function openEditor(){
   if (state !== 'play' || editing || menuOpen || bookOpen) return;
+  editSnapshot={mask:Array.from(P.mask).join(','),jump:jumpPower()*jumpPower()/(2*GRAV*CELL)};
   editing = true; edEl.classList.remove('hide');
+  drawEditor();
   clearInput();
   tone(500,700,0.06,'triangle',0.04);
 }
 function closeEditor(silent){
   if (!editing) { edEl.classList.add('hide'); return; }
   editing = false; edEl.classList.add('hide');
-  if (!silent) tone(700,500,0.06,'triangle',0.04);
+  if (!silent){
+    tone(700,500,0.06,'triangle',0.04);
+    if(editSnapshot && editSnapshot.mask!==Array.from(P.mask).join(',')){
+      const gain=jumpPower()*jumpPower()/(2*GRAV*CELL)-editSnapshot.jump;
+      toast(gain>.3?'变轻了，预计能多跳 '+gain.toFixed(1)+' 格。去试试！':
+        '现在 '+Math.round(bounds().h/CELL)+' 格高 · '+routeStep().title);
+    }
+  }
+  refreshJourney();
+}
+function syncQuickButtons(){
+  $('edLight').disabled=!canConsumeMaterial('stone');
+  let spot=false;
+  if(P.bag[P.sel]>0)for(let j=0;j<MH&&!spot;j++)for(let i=0;i<MW&&!spot;i++)spot=canPlace(i,j);
+  $('edAttach').disabled=!spot;
 }
 function quickBeads(action){
   if (!editing || state !== 'play' || bookOpen) return false;
@@ -1530,6 +1679,7 @@ edCv.addEventListener('pointerdown', e=>{
   if (P.mask[j*MW+i]) removeAt(i,j); else placeAt(i,j);
 });
 function drawEditor(){
+  syncQuickButtons();
   const S = ED;
   edx.fillStyle = '#0b0a10'; edx.fillRect(0,0,256,256);
   // 背后真实的世界:墙会挡住哪些格子
@@ -1594,6 +1744,10 @@ function openMenu(){
   menuOpen = true; menuEl.classList.remove('hide');
   clearInput();
   $('pmLevel').textContent = LEVELS[level].name;
+  const step=routeStep();
+  $('pmGoal').textContent=step.title;
+  $('pmAdvice').textContent=step.tip;
+  $('pmPlan').innerHTML=levelHint();
   $('pmSound').textContent = muted ? '声音:关' : '声音:开';
   $('pmHard').textContent = store.get('hard', false) ? '硬核:开(无青旗)' : '硬核:关';
   const grid = $('pmLevels'); grid.textContent = '';
@@ -1605,6 +1759,8 @@ function openMenu(){
     b.textContent = L.name.split(' · ')[0];
     if (stars){ const badge=document.createElement('small'); badge.textContent='✦'.repeat(stars); b.appendChild(badge); }
     b.title = L.name + ' · 最佳光种 ' + stars + '/3' + (i > un ? ' · 还没通关' : '');
+    const record=store.get('journeyRecords',{})[i];
+    if(record){const badge=document.createElement('small');badge.textContent=record.deaths===0?'无散架':'已走通';b.appendChild(badge);}
     b.addEventListener('click', ()=>{ closeMenu(true); loadLevel(i); });
     grid.appendChild(b);
   });
@@ -1616,6 +1772,7 @@ function closeMenu(silent){
   if (!silent) tone(380,500,0.06,'triangle',0.04);
 }
 $('btnPause').addEventListener('click', ()=>{ ac(); menuOpen ? closeMenu() : openMenu(); });
+$('btnGuide').addEventListener('click',()=>openMenu());
 $('pmResume').addEventListener('click', ()=> closeMenu());
 $('pmRetry').addEventListener('click', ()=>{ closeMenu(true); loadLevel(level, true); });
 $('pmSound').addEventListener('click', ()=>{ setMuted(!muted); $('pmSound').textContent = muted ? '声音:关' : '声音:开'; });
@@ -1728,6 +1885,8 @@ function damagePlayerNear(x,y,count){
 }
 
 function die(){
+  if(state!=='play')return;
+  run.lastAdvice=routeStep().tip;run.deaths++;
   state = 'dead'; timer = 0; stats.deaths++;
   closeEditor(true);
   for (let j=0;j<MH;j++) for (let i=0;i<MW;i++){
@@ -2101,7 +2260,7 @@ function updateItems(dt){
     it.t += dt;
     // 靠近时被吸过来
     const dx = pcx - it.x, dy = pcy - it.y, d = Math.hypot(dx, dy);
-    if (d < 34 && it.t > 0.4){
+    if (d > 0.001 && d < 34 && it.t > 0.4){
       it.vx += dx/d * 500*dt; it.vy += dy/d * 500*dt;
     }
     it.vy = clamp(it.vy + 900*dt, -400, 500);
@@ -2178,7 +2337,6 @@ function update(dt){
   }
   if (state === 'clear'){
     timer += dt; updateParticles(dt);
-    if (timer > 0.85) loadLevel(level+1);
     return;
   }
   if (state !== 'play') return;
@@ -2901,15 +3059,32 @@ function drawLightmap(lights){
 }
 
 const wFill = $('wbar').querySelector('i'), wMark = $('wbar').querySelector('em');
-let lastW = -1, lastMark = null;
+let lastW = '', lastMark = null;
+function weightTarget(){
+  const b=bounds(),cx=b.x+b.w/2,foot=b.y+b.h;
+  const plates=devices.filter(d=>d.type==='plate'&&!d.lit);
+  plates.sort((a,b)=>Math.hypot(a.x+a.w/2-cx,a.y-foot)-Math.hypot(b.x+b.w/2-cx,b.y-foot));
+  if(plates.length)return {min:plates[0].weight,max:plates[0].maxWeight||null};
+  const crumble=LEVELS[level].rects.some(r=>r.t==='crumble'&&Array.from({length:r.w},(_,i)=>gt(r.x+i,r.y)).includes(TILE.CRUMBLE));
+  return crumble?{min:12.5,max:null}:null;
+}
 function drawHudInCanvas(){
+  if(state==='play' && time>=nextJourneyRefresh){nextJourneyRefresh=time+.2;refreshJourney();}
   // 重量条放在 DOM 顶栏里,由 flex 布局排开,不会被按钮挡住
   const wsum = bounds().empty ? 0 : weight();
-  if (wsum !== lastW){
-    lastW = wsum;
+  const target=weightTarget();
+  const match=target && wsum>=target.min && (!target.max || wsum<=target.max);
+  const value=wsum.toFixed(1)+(target?' / '+target.min+(target.max?'–'+target.max:'+'):'');
+  const key=value+'|'+!!match;
+  if (key !== lastW){
+    lastW = key;
+    $('wValue').textContent=value;
+    $('wbar').classList.toggle('matched',!!match);
+    $('wbar').title=target?'当前重量 / 最近未完成踏板或脆地板的要求。'+(match?'重量已达标':'调整身体重量后再试'):'重量越大，跳得越低';
+    $('wbar').setAttribute('aria-label','重量 '+value+(match?'，已达标':''));
     const pct = clamp(wsum/28, 0, 1);
     wFill.style.width = (pct*100).toFixed(1)+'%';
-    wFill.style.background = pct > 0.8 ? '#ff7a5a' : wsum >= 12.5 ? '#c9a46a' : '#9a86d8';
+    wFill.style.background = match?'#9dd775':target&&target.max&&wsum>target.max?'#ff7a5a':'#9a86d8';
   }
   $('seedCount').textContent = seeds.length ? '✦ ' + seeds.filter(s=>s.got).length + '/' + seeds.length : '';
   const mark = LEVELS[level].rects.some(r => r.t === 'crumble');
@@ -3013,7 +3188,7 @@ function render(){
   }
   // 转场
   if (state === 'clear'){
-    const a = clamp(timer/0.85, 0, 1);
+    const a = clamp(timer/0.85, 0, 0.35);
     ctx.fillStyle = 'rgba(6,5,10,'+a+')';
     ctx.fillRect(0,0,CW,CH);
   }
@@ -3041,8 +3216,10 @@ makeVignette();
 
 // ─── 横屏 / 竖屏视野:手机竖着拿时画布变成 3:4,看得更高、画面更大
 function applyViewMode(){
+  clearInput();
   const portrait = touchMode && window.innerHeight > window.innerWidth * 1.1;
-  const w = portrait ? 360 : 640, h = portrait ? 480 : 360;
+  const compact = touchMode && !portrait && window.innerHeight<=600;
+  const w = portrait ? 384 : compact ? 480 : 640, h = portrait ? 512 : compact ? 320 : 360;
   document.body.classList.toggle('tall', portrait);
   if (w === CW && h === CH) return;
   CW = w; CH = h;
@@ -3079,6 +3256,7 @@ document.addEventListener('visibilitychange', ()=>{
 // iOS 地址栏伸缩时 100vh 不可靠,用真实 innerHeight
 function fitVH(){ document.documentElement.style.setProperty('--vh', (window.innerHeight*0.01)+'px'); applyViewMode(); }
 addEventListener('resize', fitVH); addEventListener('orientationchange', ()=> setTimeout(fitVH, 250));
+if(window.visualViewport)window.visualViewport.addEventListener('resize',fitVH);
 fitVH();
 
 // ═════════════════════════════════════════════ 开始
@@ -3115,11 +3293,20 @@ function startGame(cont){
   loadLevel(cont ? store.get('best', 0) : 0);
 }
 const beadBook=window.GraftBeads.create(store,{
-  open(){closeEditor(true);closeMenu(true);bookOpen=true;clearInput();document.body.classList.add('crafting');},
-  close(){bookOpen=false;clearInput();document.body.classList.remove('crafting');},
+  levelCount:()=>LEVELS.length,
+  open(){closeEditor(true);closeMenu(true);bookOpen=true;clearInput();$('stageClear').inert=true;document.body.classList.add('crafting');},
+  close(){bookOpen=false;clearInput();$('stageClear').inert=false;document.body.classList.remove('crafting');if(state==='clear'||state==='win')$('clearReward').textContent=rewardNote();},
   sound(){tone(610,820,.035,'triangle',.025);},
   finish(){arp([523,659,784,1046],90);vibrate(25);},
 });
+const harbor=window.GraftHarbor.mount(store,{
+  patterns:beadBook.patterns,owned:()=>beadBook.completed,award:id=>beadBook.awardPattern(id),book:id=>beadBook.open(id),
+  open(){closeEditor(true);closeMenu(true);bookOpen=true;clearInput();$('stageClear').inert=true;document.body.classList.add('crafting');},
+  close(){bookOpen=false;clearInput();$('stageClear').inert=false;document.body.classList.remove('crafting');},
+  sound(match){ac();if(match){arp([659,784,1046],45);vibrate(15);}else tone(460,620,.035,'triangle',.025);},
+});
+$('btnHarbor').addEventListener('click',()=>harbor.open());
+$('pmHarbor').addEventListener('click',()=>harbor.open());
 $('btnBook').addEventListener('click',()=>beadBook.open());
 $('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
@@ -3190,7 +3377,8 @@ window.__game = {
   get cam(){ return cam; },
   key: (code, down)=>{ keys[code] = !!down; if (down && code === 'Space') pressJump(); if (!down && code === 'Space') releaseJump(); },
   step: (dt)=> update(dt),
-  beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  routeStep, refreshJourney, nextLevel, continueJourney,
   get quality(){ return quality; },
 };
 /* @debug-end */

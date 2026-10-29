@@ -47,6 +47,11 @@ deploy)
     node tests/playthrough.js
     node tests/combat.js
     node tests/beads.js
+    node tests/harbor.js
+    node tests/journey.js
+    node tests/challenge.js
+    node tests/mobile.js
+    node tests/repair-batch1.js
     node tests/jump-feel.js
     node tests/adventure.js
     node tests/devices.js
