@@ -3283,7 +3283,7 @@ function spawnJourneyWave(wave){
 function availableElements(){const c=LEVELS[level].boss||0;return ['water','fire',...(c>=1?['grass']:[]),...(c>=2?['stone']:[]),...(c>=3?['steam']:[]),...(c>=4?['light']:[])];}
 function switchElement(key){
  if(state!=='play'||menuOpen||bookOpen||!availableElements().includes(key))return false;
- const was=editing;editing=true;const ok=equipForm(key);editing=was;chosenElement=key;if(!ok)toast('已切换：'+elementLabels[key]+'；受损外形暂时保留');clearInput();
+ const was=editing;editing=true;const ok=equipForm(key);editing=was;chosenElement=key;if(!ok)toast('已切换：'+elementLabels[key]+'；受损外形暂时保留');elements.hold(skillPointer!==null);
  for(const b of $('elementChoices').children)b.classList.toggle('selected',b._element===key);
  $('skillReadout').textContent=elementLabels[key]+' · 按住攻击';return true;
 }

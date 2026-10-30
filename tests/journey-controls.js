@@ -8,3 +8,5 @@ G.loadLevel(0);step(30);assert(G.elements.cast(),'普通探索没有配方也能
 console.log('PASS 默认可施法、点击切换、掉豆不失效、两队小怪与关底门槛、通关解锁、普通攻击');
 
 G.loadLevel(12);G.P.bag.fire=0;assert(G.switchElement('fire'),'已解锁的技能不会被材料不足卡住');step(50);assert(G.elements.cast());assert.equal(G.elements.shots.at(-1).key,'fire');
+
+G.loadLevel(12);els.btnSkill.dispatchEvent({type:'pointerdown',pointerId:7,preventDefault(){}});assert(G.switchElement('fire'));els.btnSkill.dispatchEvent({type:'pointerup',pointerId:99});step(45);assert(G.elements.shots.some(q=>q.key==='fire'),'按住攻击切元素后应连续施法，另一根手指松开不应打断');els.btnSkill.dispatchEvent({type:'pointerup',pointerId:7});
