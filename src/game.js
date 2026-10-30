@@ -41,7 +41,8 @@ const MAT = {
   water: {id:4,key:'water',label:'水', c:'#63d2ff', c2:'#2a8fbf', edge:'#0a2a3c', w:0.3, hard:0},
   fire:  {id:5,key:'fire', label:'火', c:'#ffb02e', c2:'#e0551b', edge:'#401104', w:0.8, hard:3},
 };
-const ORDER = ['meat','grass','stone','water','fire'];
+MAT.light={id:6,key:'light',label:'光',c:'#fff2ab',c2:'#c7aa65',edge:'#51432d',w:.6,hard:1};
+const ORDER = ['meat','grass','stone','water','fire','light'];
 const MAT_HELP = {
   meat:'肉 · 基础身体,可削下再贴回,用来调整形状',
   grass:'草 · 贴在身上可唤醒蘑菇、催生藤蔓;身体不会自动长草',
@@ -49,6 +50,7 @@ const MAT_HELP = {
   water:'水 · 消耗身上一格水,可冷却炽热门、关闭喷口或挡一次火',
   fire:'火 · 贴在身上靠近荆棘自动烧开,也能克制软敌人;熄灭后回背包',
 };
+MAT_HELP.light='光 · 两颗相连形成光脉冲，驱散黑暗、破解暗影护盾';
 const BY_ID = {};
 for (const k of ORDER) BY_ID[MAT[k].id] = MAT[k];
 function matKey(id){ const m = BY_ID[id]; return m ? m.key : 'meat'; }
@@ -220,6 +222,7 @@ const music = {
 
 // ═════════════════════════════════════════════ 输入
 const keys = Object.create(null);
+var elements;
 let kJump = false, jumpBuf = 0, touchDir = 0, bufferedTouchJump = false, bookOpen = false;
 const mouse = {x:-999, y:-999, inside:false};
 
@@ -248,6 +251,7 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { pressJump(); }
+  if(e.code==='KeyJ')elements.cast();
   if (e.code === 'KeyR') { if (state==='play'||state==='dead') loadLevel(level, true); }
   if (e.code === 'KeyE' || e.code === 'Tab') { if (state === 'play') openEditor(); }
   if (e.code === 'Escape' || e.code === 'KeyP') { if (state === 'play') openMenu(); }
@@ -363,6 +367,7 @@ function clearInput(){
   for (const k in keys) keys[k]=false;
   jumpBuf=0; bufferedTouchJump=false;
   endMove(); jEnd(); releaseJump();
+  if(elements)elements.hold(false);
 }
 
 const uBtn = $('btnUndo');
@@ -676,6 +681,12 @@ function levelHint(){
 }
 
 // 提示由当前身体、位置和机关决定；允许自由试路，不要求依次打勾。
+// 元素远征：多层战场、可选高处收集与需要破盾的首领。
+window.GraftElements.BOSSES.forEach((boss,i)=>LEVELS.push({
+ name:'元素 '+(i+1)+' · '+boss.name,sub:'拼出形态，读懂破盾与反击',theme:['ember','frost','earth','fungal','dusk'][i],boss:i,lock:true,start:[8,37],
+ rects:[{x:0,y:40,w:80,h:4,t:'stone'},{x:18,y:35,w:7,h:1,t:'stone'},{x:30,y:30,w:8,h:1,t:'stone'},{x:43,y:35,w:6,h:1,t:'stone'},{x:62,y:31,w:7,h:1,t:'stone'}],
+ devices:[],items:[],enemies:[],seeds:[[21,32],[33,27],[65,28]],exit:[75,37,3,3],hint:'两颗相邻元素豆产生技能。J / 技能键释放；豆板切换形态。看地面亮框，提前躲开。'
+}));
 const JOURNEY_SKILLS = ['把身体变成钥匙','让重量帮你开路','用水保护自己','把硬材料放在接触面',
   '按地形切换身体形状','在窄路里带好保护层','在轻装与重装间切换','借植物的力量登高',
   '开门后卸重，搭浮台旅行','用水改变火焰路线','把两种材料组合起来','让四种材料接力开路'];
@@ -685,6 +696,7 @@ const JOURNEY_TEASERS = ['缝隙会检验你的形状','下一关，重量也能
   '下一关，开门后收回石豆，搭浮台上山。','下一关，水豆能关闭喷口、冷却红门。',
   '下一关，火与草会一起打开新的道路。','最后一关，把四种材料的本领串起来。'];
 function routeStep(){
+  if(LEVELS[level].boss!==undefined)return {title:'破盾 → 躲预警 → 反击；豆板换形态',extra:'两颗元素豆相连形成技能，按住技能键连续释放。',tip:'先看首领血条下的破盾提示；地面亮框出现后移开，低位冲击波可以跳过。'};
   const b=bounds(), x=(b.x+b.w/2)/CELL, foot=(b.y+b.h)/CELL;
   const step=(title,tip)=>({title,tip});
   const exit=()=>step('走进发光的出口','光种是可选挑战。可以先过关，再回来试试高处和支路。');
@@ -1102,7 +1114,7 @@ const P = {
   mask: new Uint8Array(MW*MH),
   pop: new Float32Array(MW*MH),       // 每格贴上时的弹跳动画
   vx:0, vy:0, onGround:false, coyote:0, face:1,
-  bag:{meat:0,grass:0,stone:0,water:0,fire:0},
+  bag:{meat:0,grass:0,stone:0,water:0,fire:0,light:0},
   sel:'stone',
   invuln:0, denyT:0, flash:0, shake:0,
   eyeT:0, blink:0,
@@ -1308,6 +1320,7 @@ function loadLevel(idx, retry){
   $('wrap').inert=false;$('pad').inert=false;
   document.body.classList.remove('celebrating');
   clearInput();
+  document.body.classList.toggle('element-battle',L.boss!==undefined);
   themeName = L.theme || 'violet'; TH = THEMES[themeName];
   checkpoint = null;
   loadDevices(L);
@@ -1319,8 +1332,10 @@ function loadLevel(idx, retry){
     for (let y=r.y;y<r.y+r.h;y++) for (let x=r.x;x<r.x+r.w;x++) setT(x,y,t);
   }
   spawnPlayer(L.start[0], L.start[1]);
-  P.bag = {meat:0,grass:0,stone:0,water:0,fire:0};
+  P.bag = {meat:0,grass:0,stone:0,water:0,fire:0,light:0};
   P.sel = 'stone';
+  if(L.boss!==undefined)P.bag={meat:6,stone:4,water:4,fire:4,grass:4,light:4};
+  elements.reset(L.boss===undefined?-1:L.boss);
   items = []; enemies = []; particles = []; floaters = []; drips = []; hist = []; tut = 0; tutCuts = 0;
   for (const it of (L.items||[])) addItem(it.c[0]*CELL+4, it.c[1]*CELL+4, it.m);
   for (const e of (L.enemies||[])){
@@ -1371,7 +1386,7 @@ function nextLevel(){
   $('card').classList.remove('show');
   $('clearChapter').textContent=LEVELS[level].name+' · '+(final?'旅途完成':'这一段，走通了');
   $('clearHeading').textContent=final?'把学会的，都玩出来了':'又走通了一条路';
-  $('clearSkill').textContent='这一关的本领：'+JOURNEY_SKILLS[level];
+  $('clearSkill').textContent='这一关的本领：'+(JOURNEY_SKILLS[level]||'元素形态、破盾与反击');
   $('clearSeeds').textContent='✦'.repeat(found)+'◇'.repeat(seeds.length-found);
   $('clearSeeds').setAttribute('aria-label','本次光种 '+found+' / '+seeds.length+' 颗');
   $('clearBest').textContent=bestSeeds[level]+'/'+seeds.length;
@@ -1380,7 +1395,7 @@ function nextLevel(){
     improved?'比之前少散架 '+(old.deaths-run.deaths)+' 次，走得更稳了。':
     run.deaths===0?'这一次，全程没有散架。':old?'又走通了一次。试试换一种形状，找找另一条路。':'试过 '+run.deaths+' 次散架后，你还是找到了办法。';
   $('clearReward').textContent=rewardNote();
-  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':JOURNEY_TEASERS[level+1];
+  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':(JOURNEY_TEASERS[level+1]||'下一位元素首领，需要新的拼豆打法。');
   $('clearNext').textContent=final?'回到标题':'去下一关 →';
   const trail=$('clearTrail');trail.textContent='';
   LEVELS.forEach((L,i)=>{const done=records[i]&&records[i].clears>0;const el=document.createElement('span');el.className='trail-bead'+(done?' done':'')+(i===level?' current':'');el.textContent=i+1;el.setAttribute('aria-label',L.name+(done?'，已完成':'，尚未完成'));trail.appendChild(el);});
@@ -1653,6 +1668,7 @@ function drawEditor(){
   const height=bounds().h;
   $('edSlim').textContent=height>CELL*2?'瘦身钻洞':height>CELL?'再瘦一层':'已是单层';
   $('edSlim').disabled=height<=CELL;
+  const detected=window.GraftElements.skill(P.mask);$('edSkillStatus').textContent=detected?'当前技能：'+window.GraftElements.SKILLS[detected].name+' · 改好后按住技能键':'两颗同元素相连产生技能；火水相邻产生蒸汽';
   const w = weight();
   $('edW').textContent = '跳高约 ' + (jumpPower()*jumpPower()/(2*GRAV*CELL)).toFixed(1) + ' 格 · 重 ' + w.toFixed(1) + (level === 1 || level === 4 ? (w >= 12.5 ? ' · 够压塌地板' : ' · 压塌地板要 12.5') : '');
 }
@@ -1976,7 +1992,7 @@ function updatePlayer(dt){
   } else P.lavaT = 0;
 
   // 火烧自己
-  if (countMat('fire') > 0){
+  if (countMat('fire') > 0 && LEVELS[level].boss===undefined){
     P.burnT += dt;
     if (Math.random() < 0.25){
       for (let k2=0;k2<MW*MH;k2++) if (P.mask[k2]===MAT.fire.id && Math.random()<0.3){
@@ -1999,7 +2015,7 @@ function updatePlayer(dt){
   } else P.burnT = 0;
 
   // 水蒸发
-  if (countMat('water') > 0){
+  if (countMat('water') > 0 && LEVELS[level].boss===undefined){
     P.evapT += dt;
     if (P.evapT > 7){
       P.evapT = 0;
@@ -2267,6 +2283,7 @@ function update(dt){
   updatePlayer(dt);
   if (level === 0 && !tutDone && bounds().x/CELL > 52){ tutDone = true; store.set('tutDone', true); }
   updateEnemies(dt);
+  elements.update(dt);
   updateItems(dt);
   interactDevices(dt);
   if (state !== 'play') return;
@@ -3085,6 +3102,7 @@ function render(){
   drawEnemies();
   if (state === 'play' || state === 'clear' || editing) drawPlayer();
   drawParticles();
+  elements.draw(ctx);
   drawGhost();
   drawTutorial();
   const lights = collectLights();
@@ -3228,6 +3246,27 @@ const harbor=window.GraftHarbor.mount(store,{
 });
 $('btnHarbor').addEventListener('click',()=>harbor.open());
 $('pmHarbor').addEventListener('click',()=>harbor.open());
+elements=window.GraftElements.create({
+ mask:()=>P.mask,bounds,face:()=>P.face,play:()=>state==='play'&&!editing&&!menuOpen&&!bookOpen,
+ solid:(x,y)=>boxSolid(x-1,y-1,2,2),overlap:rectOverlap,enemies:()=>enemies,damage:damageEnemy,
+ hurt:(x,y)=>damagePlayerNear(x,y,1),note:toast,burst,sound:()=>tone(350,650,.07,'triangle',.04),win:()=>{exitLocked=false;},
+ ui:(name,cd,boss)=>{$('btnSkill').textContent=cd>0?cd.toFixed(1):name;$('btnSkill').disabled=state!=='play'||editing||menuOpen||bookOpen;
+ $('bossHud').classList.toggle('hide',!boss);if(boss){$('bossName').textContent=boss.name+' · '+boss.hp+'/'+boss.max;$('bossRule').textContent=boss.hp<=0?'首领击破，前往右侧出口':boss.shield?'用「'+boss.weakName+'」破盾 · 剩 '+boss.shield+' 层':'反击窗口 '+Math.max(0,boss.open).toFixed(1)+' 秒';$('bossHP').style.width=boss.hp/boss.max*100+'%';}}
+});
+$('btnSkill').addEventListener('pointerdown',e=>{e.preventDefault();if(state!=='play'||editing||menuOpen||bookOpen)return;try{$('btnSkill').setPointerCapture(e.pointerId);}catch(_){}elements.hold(true);elements.cast();});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('btnSkill').addEventListener(ev,()=>elements.hold(false));
+function equipForm(key){
+ if(!editing)return false;const pool={...P.bag};for(const id of P.mask)if(id)pool[matKey(id)]++;
+ const next=new Uint8Array(64);for(let j=2;j<=4;j++)for(let i=2;i<=3;i++)next[j*8+i]=1;
+ const shapes={stone:[[4,3,3],[4,4,3]],fire:[[2,1,5],[3,1,5]],water:[[4,3,4],[5,3,4]],grass:[[1,3,2],[1,4,2]],light:[[2,1,6],[3,1,6]],steam:[[4,3,5],[5,3,4]]};
+ if(!shapes[key])return false;for(const [i,j,id]of shapes[key])next[j*8+i]=id;
+ for(const id of next)if(id){const k=matKey(id);if(!pool[k]){toast('材料不足，先拾取对应的功能豆');return false;}pool[k]--;}
+ const old=P.mask.slice(),oldY=P.py,oldX=P.px,oldB=bounds();P.mask.set(next);const nb=bounds();P.py+=oldB.y+oldB.h-nb.y-nb.h;P.px+=oldB.x+oldB.w/2-nb.x-nb.w/2;
+ const b=bounds();if(boxSolid(b.x,b.y,b.w,b.h)||devices.some(d=>(d.type==='lift'||d.type==='vine'&&d.grown)&&rectOverlap(b,d))){P.mask.set(old);P.py=oldY;P.px=oldX;toast('空间不足，先到开阔处拼形态');return false;}
+ P.bag=pool;hist=[];syncBag();syncUndo();elements.hold(false);toast(window.GraftElements.SKILLS[key].name+'形态已拼好');return true;
+}
+const formList=$('elementForms');for(const key of Object.keys(window.GraftElements.SKILLS)){const b=document.createElement('button');b.type='button';b.textContent=window.GraftElements.SKILLS[key].name;b.addEventListener('click',()=>equipForm(key));formList.appendChild(b);}
+$('btnExpedition').addEventListener('click',()=>{ov.classList.add('hide');document.body.classList.remove('menu');stats.start=performance.now();loadLevel(12);openEditor();});
 $('btnBook').addEventListener('click',()=>beadBook.open());
 $('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
@@ -3267,7 +3306,7 @@ window.__game = {
   get cam(){ return cam; },
   key: (code, down)=>{ keys[code] = !!down; if (down && code === 'Space') pressJump(); if (!down && code === 'Space') releaseJump(); },
   step: (dt)=> update(dt),
-  harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  elements,equipForm,harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
   routeStep, refreshJourney, nextLevel, continueJourney,
   get quality(){ return quality; },
 };

@@ -378,3 +378,12 @@ body.touch #wValue{font-family:Consolas,"Cascadia Mono",monospace}
 }
 #harbor.lost #harborPool{display:none}
 #harbor.lost #harborMessage{color:#98543d;font-weight:600}
+#bossHud.hide{display:none}#bossHud{position:absolute;top:72px;left:50%;transform:translateX(-50%);width:min(75%,380px);text-align:center;background:#181224ed;padding:7px 10px;border:1px solid #8e718c;border-radius:8px;color:#f3e6cc;font-size:12px}#bossHud>div{height:5px;background:#43364c;margin:5px 0}#bossHP{display:block;height:100%;background:#ee9277;transition:width .15s}#bossRule{font-size:11px;color:#f6d28e}
+#elementForms{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;max-width:360px}#elementForms button{min-height:36px;padding:6px 10px;background:#30273e;color:#ffedc5;border:1px solid #a78a68;border-radius:6px;font-size:11px;cursor:pointer}
+#btnSkill{width:70px;height:70px;font-size:12px;border-color:#e0b778;background:#594155;position:absolute;right:98px;bottom:0}#btnSkill:disabled{opacity:.45}
+#elementForms{grid-column:2}body:not(.touch) #btnSkill{display:none}
+@media(orientation:portrait){body.touch #btnSkill{right:0;bottom:110px;width:66px;height:60px}body.touch #bossHud{top:85px;width:88%;font-size:11px}body.touch #edBag{display:grid;grid-template-columns:repeat(3,1fr)}#elementForms{grid-column:auto}}
+@media(orientation:landscape) and (max-height:600px){body.touch #btnSkill{right:0;bottom:90px;width:72px;height:60px}body.touch #btnEdit{margin-bottom:170px}body.touch #bossHud{top:55px;width:68%;padding:4px;font-size:10px}.ed-panel #edCv{grid-row:1/span 7}#elementForms{grid-column:2}}
+#elementForms{grid-column:auto}#edSkillStatus{font-size:11px;color:#fff0b7}
+@media(orientation:landscape) and (max-height:600px){#elementForms,#edSkillStatus{grid-column:2}.ed-panel #edCv{grid-row:1/span 8}}
+#clearTrail{flex-wrap:wrap;justify-content:center}.trail-bead{flex-shrink:0}body.element-battle #toast{top:42%}

@@ -48,7 +48,7 @@ G.loadLevel(0);G.nextLevel();
 assert.equal(saved('journeyRecords')[0].deaths,0);assert.match(els.clearPraise.textContent,/少散架 1 次/);
 click('clearRetry');G.die();step(90);G.nextLevel();
 assert.equal(saved('journeyRecords')[0].deaths,0);assert.equal(saved('journeyRecords')[0].clears,3);
-G.loadLevel(11);G.nextLevel();assert.equal(G.state,'win');
+G.loadLevel(G.LEVELS.length-1);G.nextLevel();assert.equal(G.state,'win');
 click('clearBook');assert(G.beadBook.active);G.beadBook.close();
 click('clearNext');assert.equal(G.state,'title');assert(els.stageClear.classList.contains('hide'));assert(!els.wrap.inert);
 console.log('PASS 动态目标、早期复活点、成果停留、图册往返、输入隔离、成长记录与最终通关');

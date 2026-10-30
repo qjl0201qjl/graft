@@ -33,7 +33,7 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>
         </button>
       </div>
-      <div id="bag"></div>
+      <div id="bag"></div><div id="bossHud" class="hide"><strong id="bossName"></strong><div><i id="bossHP"></i></div><span id="bossRule"></span></div>
       <div id="toast"></div>
       <div id="card"><div class="cn"></div><div class="cs"></div></div>
     </div>
@@ -42,7 +42,7 @@
       <div class="ed-panel">
         <div class="ed-head"><span>拼豆改造</span><small id="edW"></small></div>
         <canvas id="edCv" width="256" height="256"></canvas>
-        <div id="edBag"></div>
+        <div id="edBag"></div><div id="elementForms" aria-label="拼豆技能形态"></div><div id="edSkillStatus" class="ed-material"></div>
         <div class="ed-quick"><button id="edSlim" type="button">瘦身钻洞</button><button id="edLight" type="button">收回石豆</button><button id="edAttach" type="button">贴一颗所选豆</button></div>
         <div id="edMatHint" class="ed-material" aria-live="polite"></div>
         <div class="ed-tip">点<b>空位</b>贴上所选材料 · 点<b>身体</b>削下一格<br><i class="lg ok"></i>可贴　<i class="lg cut"></i>可削　<i class="lg no"></i>被墙挡住</div>
@@ -71,6 +71,7 @@
       <div class="journey-note">点三颗同色豆 · 拼作品 · 建自己的豆岛</div>
       <div class="menu">
         <button class="btn primary" id="btnHarbor" type="button">打捞拼豆</button>
+        <button class="btn" id="btnExpedition" type="button">元素远征 · Boss</button>
         <button class="btn" id="btnStart" type="button">遗迹闯关</button>
         <button class="btn" id="btnCont" type="button"></button>
         <button class="btn" id="btnBook" type="button">拼豆图册</button>
@@ -90,7 +91,7 @@
     <div class="rbtns">
       <button id="btnUndo" class="off" type="button" aria-label="撤销">↶</button>
       <button id="btnEdit" type="button">豆板</button>
-      <button id="btnJump" type="button">跳</button>
+      <button id="btnSkill" type="button" aria-label="按住释放元素技能">技能</button><button id="btnJump" type="button">跳</button>
     </div>
   </div>
   <div id="rotate">横过来玩更爽 ↻</div>
@@ -130,6 +131,7 @@
 </div>
 <script src="src/beads.js"></script>
 <script src="src/harbor.js"></script>
+<script src="src/elements.js"></script>
 <script src="src/game.js"></script>
 </body>
 </html>

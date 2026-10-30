@@ -48,6 +48,7 @@ deploy)
     node tests/combat.js
     node tests/beads.js
     node tests/harbor.js
+    node tests/elements.js
     node tests/journey.js
     node tests/challenge.js
     node tests/mobile.js

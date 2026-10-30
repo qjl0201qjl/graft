@@ -6,6 +6,8 @@ echo "── 游戏:各关加载 / 自动通关 / 战斗"
 node --check src/game.js
 node --check src/beads.js
 node --check src/harbor.js
+node --check src/elements.js
+node tests/elements.js
 node tests/smoke.js | tail -1
 node tests/playthrough.js
 node tests/combat.js

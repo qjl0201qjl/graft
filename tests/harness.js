@@ -60,6 +60,7 @@ function boot(opts){
   vm.createContext(win);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'beads.js'), 'utf8'), win);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'harbor.js'), 'utf8'), win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'elements.js'), 'utf8'), win);
   vm.runInContext(fs.readFileSync(file, 'utf8'), win, { filename:'game.js' });
   return { G: win.__game, els, win };
 }
