@@ -8,6 +8,7 @@ node --check src/beads.js
 node --check src/harbor.js
 node --check src/elements.js
 node tests/elements.js
+node tests/journey-controls.js
 node tests/smoke.js | tail -1
 node tests/playthrough.js
 node tests/combat.js

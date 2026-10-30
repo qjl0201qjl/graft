@@ -222,7 +222,10 @@ const music = {
 
 // ═════════════════════════════════════════════ 输入
 const keys = Object.create(null);
-var elements;
+var elements,skillPointer=null;
+let chosenElement=null,journeyWave=0,journeyAwake=false;
+const chapterNames=['余烬海岸','回声湿地','断层峡谷','蔓生庭院','无光之城'];
+function journeyReady(){return LEVELS[level].boss===undefined||journeyAwake;}
 let kJump = false, jumpBuf = 0, touchDir = 0, bufferedTouchJump = false, bookOpen = false;
 const mouse = {x:-999, y:-999, inside:false};
 
@@ -367,7 +370,7 @@ function clearInput(){
   for (const k in keys) keys[k]=false;
   jumpBuf=0; bufferedTouchJump=false;
   endMove(); jEnd(); releaseJump();
-  if(elements)elements.hold(false);
+  skillPointer=null;if(elements)elements.hold(false);
 }
 
 const uBtn = $('btnUndo');
@@ -683,9 +686,9 @@ function levelHint(){
 // 提示由当前身体、位置和机关决定；允许自由试路，不要求依次打勾。
 // 元素远征：多层战场、可选高处收集与需要破盾的首领。
 window.GraftElements.BOSSES.forEach((boss,i)=>LEVELS.push({
- name:'元素 '+(i+1)+' · '+boss.name,sub:'拼出形态，读懂破盾与反击',theme:['ember','frost','earth','fungal','dusk'][i],boss:i,lock:true,start:[8,37],
+ name:chapterNames[i],sub:'探索 · 清理小怪 · 关底挑战',theme:['ember','frost','earth','fungal','dusk'][i],boss:i,lock:true,start:[8,37],
  rects:[{x:0,y:40,w:80,h:4,t:'stone'},{x:18,y:35,w:7,h:1,t:'stone'},{x:30,y:30,w:8,h:1,t:'stone'},{x:43,y:35,w:6,h:1,t:'stone'},{x:62,y:31,w:7,h:1,t:'stone'}],
- devices:[],items:[],enemies:[],seeds:[[21,32],[33,27],[65,28]],exit:[75,37,3,3],hint:'两颗相邻元素豆产生技能。J / 技能键释放；豆板切换形态。看地面亮框，提前躲开。'
+ devices:[],items:[],enemies:[],seeds:[[21,32],[33,27],[65,28]],exit:[75,37,3,3],hint:'点下方元素切换。按住攻击自动瞄准；清理两队小怪，向右抵达关底才会出现首领。后续元素通关解锁。看地面亮框，提前躲开。'
 }));
 const JOURNEY_SKILLS = ['把身体变成钥匙','让重量帮你开路','用水保护自己','把硬材料放在接触面',
   '按地形切换身体形状','在窄路里带好保护层','在轻装与重装间切换','借植物的力量登高',
@@ -696,7 +699,7 @@ const JOURNEY_TEASERS = ['缝隙会检验你的形状','下一关，重量也能
   '下一关，开门后收回石豆，搭浮台上山。','下一关，水豆能关闭喷口、冷却红门。',
   '下一关，火与草会一起打开新的道路。','最后一关，把四种材料的本领串起来。'];
 function routeStep(){
-  if(LEVELS[level].boss!==undefined)return {title:'破盾 → 躲预警 → 反击；豆板换形态',extra:'两颗元素豆相连形成技能，按住技能键连续释放。',tip:'先看首领血条下的破盾提示；地面亮框出现后移开，低位冲击波可以跳过。'};
+  if(LEVELS[level].boss!==undefined)return {title:journeyWave<2?'清理前路的小怪，再继续向右':!journeyReady()?'前路已清理，向右寻找守望者':'看首领提示，点元素切换后按住攻击',tip:'下方点水或火可立即切换；按住攻击会自动瞄准。击败两队小怪、抵达关底后才出现首领。'};
   const b=bounds(), x=(b.x+b.w/2)/CELL, foot=(b.y+b.h)/CELL;
   const step=(title,tip)=>({title,tip});
   const exit=()=>step('走进发光的出口','光种是可选挑战。可以先过关，再回来试试高处和支路。');
@@ -1354,6 +1357,9 @@ function loadLevel(idx, retry){
   buildLevelArt(level*3.7+1.3);
   camSnap();
   state = 'play';
+  chosenElement=null;journeyWave=0;journeyAwake=false;
+  if(L.boss!==undefined){switchElement('water');spawnJourneyWave(0);refreshElements();}
+  $('elementDock').classList.toggle('hide',L.boss===undefined);
   timer = 0; shake = 0; freeze = 0; levelT = 0;
   $('lv').textContent = String(level+1).padStart(2,'0') + ' / ' + String(LEVELS.length).padStart(2,'0');
   refreshJourney();
@@ -1377,6 +1383,7 @@ function nextLevel(){
   const improved=old && run.deaths<old.deaths;
   records[level]={clears:(old?old.clears:0)+1,deaths:old?Math.min(old.deaths,run.deaths):run.deaths};
   store.set('journeyRecords',records);
+  if(LEVELS[level].boss!==undefined){store.set('elementChapter',Math.max(store.get('elementChapter',0),Math.min(4,LEVELS[level].boss+1)));}
   const final=level+1>=LEVELS.length;
   store.set('unlocked',Math.max(store.get('unlocked',0),Math.min(level+1,LEVELS.length-1)));
   store.set('best',final?0:Math.max(store.get('best',0),level+1));
@@ -1395,7 +1402,8 @@ function nextLevel(){
     improved?'比之前少散架 '+(old.deaths-run.deaths)+' 次，走得更稳了。':
     run.deaths===0?'这一次，全程没有散架。':old?'又走通了一次。试试换一种形状，找找另一条路。':'试过 '+run.deaths+' 次散架后，你还是找到了办法。';
   $('clearReward').textContent=rewardNote();
-  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':(JOURNEY_TEASERS[level+1]||'下一位元素首领，需要新的拼豆打法。');
+  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':(JOURNEY_TEASERS[level+1]||'继续探索，通关后会解锁新的元素。');
+  if(LEVELS[level].boss!==undefined){const chapter=LEVELS[level].boss;$('clearNextTease').textContent=chapter<4?'下一章：'+chapterNames[chapter+1]+' · 解锁'+['草','岩','雾','光'][chapter]+'元素':'逐光之旅完成，可以回到选关继续探索。';}
   $('clearNext').textContent=final?'回到标题':'去下一关 →';
   const trail=$('clearTrail');trail.textContent='';
   LEVELS.forEach((L,i)=>{const done=records[i]&&records[i].clears>0;const el=document.createElement('span');el.className='trail-bead'+(done?' done':'')+(i===level?' current':'');el.textContent=i+1;el.setAttribute('aria-label',L.name+(done?'，已完成':'，尚未完成'));trail.appendChild(el);});
@@ -1668,7 +1676,7 @@ function drawEditor(){
   const height=bounds().h;
   $('edSlim').textContent=height>CELL*2?'瘦身钻洞':height>CELL?'再瘦一层':'已是单层';
   $('edSlim').disabled=height<=CELL;
-  const detected=window.GraftElements.skill(P.mask);$('edSkillStatus').textContent=detected?'当前技能：'+window.GraftElements.SKILLS[detected].name+' · 改好后按住技能键':'两颗同元素相连产生技能；火水相邻产生蒸汽';
+  const detected=window.GraftElements.skill(P.mask);$('edSkillStatus').textContent=LEVELS[level].boss!==undefined?'旅途技能在元素栏直接切换；这里仅调整身体外形。':detected?'当前技能：'+window.GraftElements.SKILLS[detected].name+' · 改好后按住技能键':'两颗同元素相连产生技能；火水相邻产生蒸汽';
   const w = weight();
   $('edW').textContent = '跳高约 ' + (jumpPower()*jumpPower()/(2*GRAV*CELL)).toFixed(1) + ' 格 · 重 ' + w.toFixed(1) + (level === 1 || level === 4 ? (w >= 12.5 ? ' · 够压塌地板' : ' · 压塌地板要 12.5') : '');
 }
@@ -2157,7 +2165,7 @@ function updateEnemies(dt){
       noise(0.3, 0.07, 150, 2500);
       vibrate(e.big?80:40);
       enemies.splice(n,1);
-      if (exitLocked && enemies.length === 0){
+      if (exitLocked && enemies.length === 0 && LEVELS[level].boss===undefined){
         exitLocked = false;
         toast('出口开了');
         arp([392,523,659], 80);
@@ -2283,6 +2291,9 @@ function update(dt){
   updatePlayer(dt);
   if (level === 0 && !tutDone && bounds().x/CELL > 52){ tutDone = true; store.set('tutDone', true); }
   updateEnemies(dt);
+  if(LEVELS[level].boss!==undefined&&journeyWave===0&&!enemies.length&&bounds().x>210){journeyWave=1;spawnJourneyWave(1);toast('继续向右，试试另一种元素');}
+  if(LEVELS[level].boss!==undefined&&journeyWave===1&&!enemies.length){journeyWave=2;toast('前路已清理，前往右侧关底');}
+  if(LEVELS[level].boss!==undefined&&journeyWave>=2&&bounds().x>350)journeyAwake=true;
   elements.update(dt);
   updateItems(dt);
   interactDevices(dt);
@@ -3247,26 +3258,41 @@ const harbor=window.GraftHarbor.mount(store,{
 $('btnHarbor').addEventListener('click',()=>harbor.open());
 $('pmHarbor').addEventListener('click',()=>harbor.open());
 elements=window.GraftElements.create({
- mask:()=>P.mask,bounds,face:()=>P.face,play:()=>state==='play'&&!editing&&!menuOpen&&!bookOpen,
+ selected:()=>LEVELS[level].boss!==undefined?chosenElement:null,ready:journeyReady,mask:()=>P.mask,bounds,face:()=>P.face,play:()=>state==='play'&&!editing&&!menuOpen&&!bookOpen,
  solid:(x,y)=>boxSolid(x-1,y-1,2,2),overlap:rectOverlap,enemies:()=>enemies,damage:damageEnemy,
  hurt:(x,y)=>damagePlayerNear(x,y,1),note:toast,burst,sound:()=>tone(350,650,.07,'triangle',.04),win:()=>{exitLocked=false;},
- ui:(name,cd,boss)=>{$('btnSkill').textContent=cd>0?cd.toFixed(1):name;$('btnSkill').disabled=state!=='play'||editing||menuOpen||bookOpen;
- $('bossHud').classList.toggle('hide',!boss);if(boss){$('bossName').textContent=boss.name+' · '+boss.hp+'/'+boss.max;$('bossRule').textContent=boss.hp<=0?'首领击破，前往右侧出口':boss.shield?'用「'+boss.weakName+'」破盾 · 剩 '+boss.shield+' 层':'反击窗口 '+Math.max(0,boss.open).toFixed(1)+' 秒';$('bossHP').style.width=boss.hp/boss.max*100+'%';}}
+ ui:(name,cd,boss)=>{$('btnSkill').textContent='攻击';$('skillReadout').textContent=(chosenElement?elementLabels[chosenElement]:name)+(cd>.05?' · 准备中 '+cd.toFixed(1)+' 秒':' · 按住攻击，自动瞄准');$('btnCast').disabled=state!=='play'||editing||menuOpen||bookOpen;$('btnSkill').disabled=state!=='play'||editing||menuOpen||bookOpen;
+ $('bossHud').classList.toggle('hide',!boss);if(boss){$('bossName').textContent=journeyReady()?boss.name+' · '+boss.hp+'/'+boss.max:chapterNames[boss.index]+' · 前路探索';$('bossRule').textContent=!journeyReady()?(journeyWave<2?(enemies.length?('前路 '+(journeyWave+1)+'/2 · '+({fire:'用水对付火焰小怪',grass:'用火清理草系小怪',water:'用草克制水系小怪',stone:'用岩近身破甲',dark:'用光驱散暗影'}[enemies[0].affinity]||'按住攻击')):'这一段已清理，继续向右走'):'小怪已清理，向右抵达关底'):boss.hp<=0?'首领击破，前往右侧出口':boss.shield?'用「'+boss.weakName+'」破盾 · 剩 '+boss.shield+' 层':'反击窗口 '+Math.max(0,boss.open).toFixed(1)+' 秒';$('bossHP').style.width=journeyReady()?boss.hp/boss.max*100+'%':'0%';}}
 });
-$('btnSkill').addEventListener('pointerdown',e=>{e.preventDefault();if(state!=='play'||editing||menuOpen||bookOpen)return;try{$('btnSkill').setPointerCapture(e.pointerId);}catch(_){}elements.hold(true);elements.cast();});
-for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('btnSkill').addEventListener(ev,()=>elements.hold(false));
+$('btnSkill').addEventListener('pointerdown',e=>{e.preventDefault();if(state!=='play'||editing||menuOpen||bookOpen||skillPointer!==null)return;skillPointer=e.pointerId;try{$('btnSkill').setPointerCapture(e.pointerId);}catch(_){}elements.hold(true);elements.cast();});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('btnSkill').addEventListener(ev,e=>{if(e.pointerId===skillPointer){skillPointer=null;elements.hold(false);}});
 function equipForm(key){
- if(!editing)return false;const pool={...P.bag};for(const id of P.mask)if(id)pool[matKey(id)]++;
+ if(!editing)return false;if(LEVELS[level].boss!==undefined&&!availableElements().includes(key)){toast('通关后会解锁这个元素');return false;}const pool={...P.bag};for(const id of P.mask)if(id)pool[matKey(id)]++;
  const next=new Uint8Array(64);for(let j=2;j<=4;j++)for(let i=2;i<=3;i++)next[j*8+i]=1;
  const shapes={stone:[[4,3,3],[4,4,3]],fire:[[2,1,5],[3,1,5]],water:[[4,3,4],[5,3,4]],grass:[[1,3,2],[1,4,2]],light:[[2,1,6],[3,1,6]],steam:[[4,3,5],[5,3,4]]};
  if(!shapes[key])return false;for(const [i,j,id]of shapes[key])next[j*8+i]=id;
  for(const id of next)if(id){const k=matKey(id);if(!pool[k]){toast('材料不足，先拾取对应的功能豆');return false;}pool[k]--;}
  const old=P.mask.slice(),oldY=P.py,oldX=P.px,oldB=bounds();P.mask.set(next);const nb=bounds();P.py+=oldB.y+oldB.h-nb.y-nb.h;P.px+=oldB.x+oldB.w/2-nb.x-nb.w/2;
  const b=bounds();if(boxSolid(b.x,b.y,b.w,b.h)||devices.some(d=>(d.type==='lift'||d.type==='vine'&&d.grown)&&rectOverlap(b,d))){P.mask.set(old);P.py=oldY;P.px=oldX;toast('空间不足，先到开阔处拼形态');return false;}
- P.bag=pool;hist=[];syncBag();syncUndo();elements.hold(false);toast(window.GraftElements.SKILLS[key].name+'形态已拼好');return true;
+ P.bag=pool;P.sel=key==='steam'?'water':key;if(LEVELS[level].boss!==undefined)chosenElement=key;hist=[];syncBag();syncUndo();elements.hold(false);toast('已切换：'+(elementLabels[key]||window.GraftElements.SKILLS[key].name));return true;
 }
-const formList=$('elementForms');for(const key of Object.keys(window.GraftElements.SKILLS)){const b=document.createElement('button');b.type='button';b.textContent=window.GraftElements.SKILLS[key].name;b.addEventListener('click',()=>equipForm(key));formList.appendChild(b);}
-$('btnExpedition').addEventListener('click',()=>{ov.classList.add('hide');document.body.classList.remove('menu');stats.start=performance.now();loadLevel(12);openEditor();});
+const formList=$('elementForms');for(const key of Object.keys(window.GraftElements.SKILLS).filter(k=>k!=='basic')){const b=document.createElement('button');b.type='button';b.textContent=window.GraftElements.SKILLS[key].name;b.addEventListener('click',()=>equipForm(key));formList.appendChild(b);}
+function spawnJourneyWave(wave){
+ const count=2+(LEVELS[level].boss>=2?1:0);for(let i=0;i<count;i++)enemies.push({x:(wave?290:155)+i*34,y:300,w:16,h:16,hp:wave?7:4,maxhp:wave?7:4,affinity:wave?['grass','water','stone','grass','dark'][LEVELS[level].boss]:'fire',mat:wave?['grass','water','stone','grass','stone'][LEVELS[level].boss]:'fire',hard:1,speed:24,vx:0,vy:0,onGround:false,cd:1.4,flash:0,big:false,born:.5,wind:0,sq:1,eyeOff:0,inv:0});
+}
+function availableElements(){const c=LEVELS[level].boss||0;return ['water','fire',...(c>=1?['grass']:[]),...(c>=2?['stone']:[]),...(c>=3?['steam']:[]),...(c>=4?['light']:[])];}
+function switchElement(key){
+ if(state!=='play'||menuOpen||bookOpen||!availableElements().includes(key))return false;
+ const was=editing;editing=true;const ok=equipForm(key);editing=was;chosenElement=key;if(!ok)toast('已切换：'+elementLabels[key]+'；受损外形暂时保留');clearInput();
+ for(const b of $('elementChoices').children)b.classList.toggle('selected',b._element===key);
+ $('skillReadout').textContent=elementLabels[key]+' · 按住攻击';return true;
+}
+const elementLabels={water:'水 · 远射',fire:'火 · 连射',grass:'草 · 控场',stone:'岩 · 近战',light:'光 · 驱暗',steam:'雾 · 范围'};
+for(const key of Object.keys(elementLabels)){const b=document.createElement('button');b.type='button';b.textContent=elementLabels[key];b._element=key;b.addEventListener('click',()=>switchElement(key));$('elementChoices').appendChild(b);}
+const refreshElements=()=>{Array.from($('elementChoices').children).forEach(b=>{b.hidden=!availableElements().includes(b._element);b.classList.toggle('selected',b._element===chosenElement);});};
+$('btnCast').addEventListener('click',()=>elements.cast());$('btnSkill').addEventListener('click',()=>elements.cast());
+$('btnExpedition').addEventListener('click',()=>{ov.classList.add('hide');document.body.classList.remove('menu');stats.start=performance.now();loadLevel(12+Math.min(4,store.get('elementChapter',0)));refreshElements();});
+
 $('btnBook').addEventListener('click',()=>beadBook.open());
 $('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
@@ -3306,7 +3332,7 @@ window.__game = {
   get cam(){ return cam; },
   key: (code, down)=>{ keys[code] = !!down; if (down && code === 'Space') pressJump(); if (!down && code === 'Space') releaseJump(); },
   step: (dt)=> update(dt),
-  elements,equipForm,harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  elements,equipForm,switchElement,journeyReady,get journeyWave(){return journeyWave;},harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
   routeStep, refreshJourney, nextLevel, continueJourney,
   get quality(){ return quality; },
 };
