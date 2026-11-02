@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="拾色">
 <meta name="format-detection" content="telephone=no">
 <meta name="robots" content="noindex,nofollow">
-<title>拾色 GRAFT</title>
+<title>GRAFT</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
@@ -33,7 +33,7 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>
         </button>
       </div>
-      <div id="bag"></div>
+      <div id="bag"></div><div id="bossHud" class="hide"><strong id="bossName"></strong><div><i id="bossHP"></i></div><span id="bossRule"></span></div>
       <div id="toast"></div>
       <div id="card"><div class="cn"></div><div class="cs"></div></div>
     </div>
@@ -42,7 +42,7 @@
       <div class="ed-panel">
         <div class="ed-head"><span>拼豆改造</span><small id="edW"></small></div>
         <canvas id="edCv" width="256" height="256"></canvas>
-        <div id="edBag"></div>
+        <div id="edBag"></div><div id="elementForms" aria-label="拼豆技能形态"></div><div id="edSkillStatus" class="ed-material"></div>
         <div class="ed-quick"><button id="edSlim" type="button">瘦身钻洞</button><button id="edLight" type="button">收回石豆</button><button id="edAttach" type="button">贴一颗所选豆</button></div>
         <div id="edMatHint" class="ed-material" aria-live="polite"></div>
         <div class="ed-tip">点<b>空位</b>贴上所选材料 · 点<b>身体</b>削下一格<br><i class="lg ok"></i>可贴　<i class="lg cut"></i>可削　<i class="lg no"></i>被墙挡住</div>
@@ -58,7 +58,7 @@
         <button id="pmRetry" class="btn" type="button">重来本关</button>
         <button id="pmHarbor" class="btn" type="button">去豆岛打捞</button>
         <button id="pmBook" class="btn" type="button">拼豆图册</button>
-        <div class="pm-sub">选关</div>
+        <button id="pmMission" class="btn" type="button">战役目录</button><div class="pm-sub">训练关卡</div>
         <div id="pmLevels"></div>
         <div class="pm-row"><button id="pmSound" class="btn" type="button">声音:开</button><button id="pmTitle" class="btn" type="button">回到标题</button></div>
         <div class="pm-row"><button id="pmHard" class="btn" type="button">硬核:关</button></div>
@@ -75,35 +75,49 @@
 
     <div id="overlay">
       <canvas id="portraitCv" width="240" height="116" aria-label="戴护目镜的拼装小探险家"></canvas>
-      <div class="logo">拾色</div>
-      <div class="sub">拼出自己的冒险</div>
-      <div class="journey-note">点三颗同色豆 · 拼作品 · 建自己的豆岛</div>
+      <div class="logo">GRAFT</div>
+      <div class="sub">拼装 · 切换 · 突破</div>
+      <div class="journey-note">五个世界，三十段冒险 · 每关约两分钟</div>
       <div class="menu">
-        <button class="btn primary" id="btnHarbor" type="button">打捞拼豆</button>
-        <button class="btn" id="btnStart" type="button">遗迹闯关</button>
+        <button class="btn" id="btnHarbor" type="button">休闲拼豆</button>
+        <button class="btn primary" id="btnExpedition" type="button">开始冒险 · 30 关</button>
+        <button class="btn" id="btnStart" type="button">训练场</button>
         <button class="btn" id="btnCont" type="button"></button>
         <button class="btn" id="btnPick" type="button">选关</button>
         <button class="btn" id="btnBook" type="button">拼豆图册</button>
       </div>
-      <div class="keys desk">
-        豆岛打捞：点三颗同色豆，自动拼作品，慢慢建起自己的岛<br>
-        遗迹闯关：<kbd>A</kbd><kbd>D</kbd> 移动 · <kbd>空格</kbd> 跳 · <kbd>E</kbd> 拼豆改造
-      </div>
+      <div class="keys desk">战役：<kbd>A</kbd><kbd>D</kbd> 移动 · <kbd>空格</kbd> 跳跃 · <kbd>J</kbd> 攻击<br>点选元素切换；想试更强的防线，可在目录选择挑战。</div>
       <div class="keys ios" id="iosTip" hidden>iPhone:点 Safari 底部的 <b>分享</b> → <b>添加到主屏幕</b>,从桌面图标打开就是全屏</div>
-      <div class="keys touch">豆岛：<b>点同色豆 → 拼作品 → 建豆岛</b><br>遗迹闯关：左右移动 · 轻点跳 · 豆板改造</div>
+      <div class="keys touch">左右移动 · 点选元素 · 按住攻击<br>挑战模式：额外战斗段、精英守卫、远程预警</div>
     </div>
   </div>
 
   <div id="hint"><div><small>眼前这一步</small><strong id="stepGoal"></strong><span id="stepExtra"></span></div><button id="btnGuide" type="button" aria-label="查看过关提示">提示</button></div>
+  <div id="elementDock" class="hide"><div id="loadoutHUD"><span id="routeRegions"></span><button id="btnForge" type="button">拼装装备</button></div><div id="equippedReadout"></div><div id="elementChoices" aria-label="点选元素即可切换"></div><div><span id="skillReadout"></span><button id="btnCast" type="button">攻击 · J</button></div></div>
   <div id="pad">
     <div id="move"><button type="button" class="direction" aria-label="向左移动">◀</button><span class="ar l"></span><span class="knob"></span><span class="ar r"></span><button type="button" class="direction" aria-label="向右移动">▶</button></div>
     <div class="rbtns">
       <button id="btnUndo" class="off" type="button" aria-label="撤销">↶</button>
       <button id="btnEdit" type="button">豆板</button>
-      <button id="btnJump" type="button">跳</button>
+      <button id="btnSkill" type="button" aria-label="攻击，按住连续释放">技能</button><button id="btnJump" type="button">跳</button>
     </div>
   </div>
   <div id="rotate">横过来玩更爽 ↻</div>
+  <section id="missionSelect" class="hide" role="dialog" aria-modal="true" aria-labelledby="missionHeading">
+    <div class="mission-shell"><header><div><small>GRAFT / CAMPAIGN</small><h1 id="missionHeading">选择路线</h1></div><button id="missionClose" type="button">返回</button></header>
+    <div class="mission-layout"><aside class="pilot-panel"><span>角色造型</span><canvas id="pilotPreview" width="320" height="280" aria-label="拼豆角色预览"></canvas><div id="pilotStyles"></div><p>出发后取豆拼装武器；组件会改变能力和角色外形。</p></aside>
+    <div class="mission-content"><p class="mission-scroll">五个世界 · 三十关冒险</p><div id="missionList" aria-label="世界列表"></div><div class="mission-world-lore"><strong id="missionWorldTitle"></strong><p id="missionWorldStory"></p></div><div id="missionStages" aria-label="选择独立关卡"></div><footer class="mission-detail"><div><h2 id="missionTitle"></h2><p id="missionDesc"></p></div><div id="missionModes" aria-label="难度"></div><p id="missionDifficulty"></p><button id="missionStart" type="button">开始行动 →</button></footer></div></div></div>
+  </section>
+  <section id="forge" class="hide" role="dialog" aria-modal="true" aria-labelledby="forgeHeading">
+    <div class="forge-shell">
+      <header><div><small id="forgeRegion"></small><h1 id="forgeHeading">拼一件装备</h1><p id="forgeMessage" role="status" aria-live="polite">取出露在外面的豆 → 选两颗配方 → 装到身上</p></div><button id="forgeClose" type="button">带回战场 →</button></header>
+      <div class="forge-layout">
+        <aside class="forge-pilot"><canvas id="forgeHero" width="240" height="160" aria-label="已安装组件的拼豆战士"></canvas><div id="forgeSlots" aria-label="选择组件挂点"></div><p id="forgeEquipped"></p><small>新组件装到选中的挂点。<br>同款自动升级，换装不影响移动和元素切换。</small></aside>
+        <div class="forge-materials"><h2>取豆 <small>战场捡豆会入堆；先取表层，下面颜色可见</small></h2><div id="forgePool"></div><div class="forge-tray-head"><strong>四格工作台</strong><span id="forgeCount"></span></div><div id="forgeTray" aria-label="暂存豆，点击归还"></div></div>
+        <div class="forge-build"><h2>选配方 <small>两颗拼成组件，带进战斗</small></h2><div id="forgeRecipes"></div></div>
+      </div>
+    </div>
+  </section>
   <section id="stageClear" class="hide" role="dialog" aria-modal="true" aria-labelledby="clearHeading">
     <div class="clear-sheet">
       <small class="clear-eyebrow" id="clearChapter"></small>
@@ -140,6 +154,11 @@
 </div>
 <script src="src/beads.js"></script>
 <script src="src/harbor.js"></script>
+<script src="src/boss-art.js"></script>
+<script src="src/elements.js"></script>
+<script src="src/campaign.js"></script>
+<script src="src/presentation.js"></script>
+<script src="src/expedition.js"></script>
 <script src="src/game.js"></script>
 </body>
 </html>

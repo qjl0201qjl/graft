@@ -9,7 +9,7 @@ const PATTERNS = [
  {id:'cat',name:'月光石猫',need:14,rows:['03000300','03303300','03333300','03434300','03313300','00333000','00333030','00033330']},
  {id:'lantern',name:'五色灯塔',need:21,rows:['00033000','00333300','00155100','00155100','00333300','00044000','00244200','03333330']},
 ];
-const COLORS=['#9a8ba8','#ff9eaf','#9dd775','#aeb9cd','#78d9e7','#ffc371'];
+const COLORS=['#9a8ba8','#ff9eaf','#9dd775','#aeb9cd','#78d9e7','#ffc371','#fff2ab'];
 const LABELS=['','粉 · 肉','绿 · 草','灰 · 石','蓝 · 水','橙 · 火'];
 function bead(p,x,y,size,id,ghost){
  const r=size*.39,cx=x+size/2,cy=y+size/2;

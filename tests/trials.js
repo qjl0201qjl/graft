@@ -31,13 +31,14 @@ function mk(){
     cut(list){ let n=0; for (const [i,j] of list) if (G.removeAt(i,j)) n++; return n; },
     cleared(){ return G.state === 'clear' || G.state === 'win' || G.level > a._lv; },
     start(lv){ a._lv = lv; G.loadLevel(lv); a.step(30); },
+    trialIndex(name){ return G.LEVELS.findIndex(L=>L.name===name); },
   };
   return a;
 }
 
 const cases = [
   [12, '试炼 1 · 四印', (a)=>{
-    a.start(12);
+    a.start(a.trialIndex('试炼 1 · 四印'));
     a.walkTo(10);                                  // 捡石头
     if (a.G.P.bag.stone < 2) throw new Error('石头不够 '+JSON.stringify(a.G.P.bag));
     a.put([[5,2],[5,3]], 'stone');                 // 贴两块 → 重 15
@@ -55,7 +56,7 @@ const cases = [
     a.walkTo(70); a.until(a.cleared, 300);
   }],
   [13, '试炼 2 · 逆流', (a)=>{
-    a.start(13);
+    a.start(a.trialIndex('试炼 2 · 逆流'));
     a.walkTo(8);                                   // 捡火
     if (a.G.P.bag.fire < 1) throw new Error('火不够');
     a.put([[5,3]], 'fire');
@@ -70,7 +71,7 @@ const cases = [
     a.walkTo(71); a.until(a.cleared, 300);
   }],
   [14, '试炼 3 · 双闸', (a)=>{
-    a.start(14);
+    a.start(a.trialIndex('试炼 3 · 双闸'));
     a.walkTo(10);
     a.put([[5,2],[5,3]], 'stone');
     a.walkTo(12); a.step(14);                      // 第一块压板 → 第一道门

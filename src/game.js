@@ -24,6 +24,10 @@ const store = {
   set(k, v){ try { localStorage.setItem('graft.'+k, JSON.stringify(v)); } catch(e){} },
 };
 
+let localReview=false;
+/* @debug-start */
+localReview=new URLSearchParams(location.search).has('review');
+/* @debug-end */
 const IS_TOUCH = (window.matchMedia && matchMedia('(pointer:coarse)').matches) || (navigator.maxTouchPoints > 0 && 'ontouchstart' in window);
 function setTouchMode(on){
   document.body.classList.toggle('touch', !!on);
@@ -41,7 +45,8 @@ const MAT = {
   water: {id:4,key:'water',label:'水', c:'#63d2ff', c2:'#2a8fbf', edge:'#0a2a3c', w:0.3, hard:0},
   fire:  {id:5,key:'fire', label:'火', c:'#ffb02e', c2:'#e0551b', edge:'#401104', w:0.8, hard:3},
 };
-const ORDER = ['meat','grass','stone','water','fire'];
+MAT.light={id:6,key:'light',label:'光',c:'#fff2ab',c2:'#c7aa65',edge:'#51432d',w:.6,hard:1};
+const ORDER = ['meat','grass','stone','water','fire','light'];
 const MAT_HELP = {
   meat:'肉 · 基础身体,可削下再贴回,用来调整形状',
   grass:'草 · 贴在身上可唤醒蘑菇、催生藤蔓;身体不会自动长草',
@@ -49,6 +54,7 @@ const MAT_HELP = {
   water:'水 · 消耗身上一格水,可冷却炽热门、关闭喷口或挡一次火',
   fire:'火 · 贴在身上靠近荆棘自动烧开,也能克制软敌人;熄灭后回背包',
 };
+MAT_HELP.light='光 · 两颗相连形成光脉冲，驱散黑暗、破解暗影护盾';
 const BY_ID = {};
 for (const k of ORDER) BY_ID[MAT[k].id] = MAT[k];
 function matKey(id){ const m = BY_ID[id]; return m ? m.key : 'meat'; }
@@ -220,6 +226,20 @@ const music = {
 
 // ═════════════════════════════════════════════ 输入
 const keys = Object.create(null);
+var elements,skillPointer=null;
+let chosenElement=null,journeyWave=0,journeyAwake=false,campaignRoom=0,roomEntryKit=null,missionStage=0,missionElapsed=0,missionFound=0,field=null;
+const expedition=window.GraftExpedition.create();
+var forge;
+const isCampaign=()=>LEVELS[level].boss!==undefined;
+let campaignDifficulty=store.get('campaignDifficulty','normal')==='hard'?'hard':'normal';
+function waveGoal(){return campaignRoom===3?0:campaignDifficulty==='hard'?3:2;}
+const chapterNames=window.GraftPresentation.names;
+const campaign=window.GraftCampaign;
+const currentMission=()=>campaign.mission(LEVELS[level].boss,missionStage);
+const regionName=(room=campaignRoom)=>campaign.region(LEVELS[level].boss,room);
+const isBossMission=()=>isCampaign()&&missionStage===5;
+function missionProgress(){return campaign.progress(store.get('missionProgress',null),store.get('elementChapter',0));}
+function journeyReady(){return LEVELS[level].boss===undefined||(missionStage===5&&journeyAwake);}
 let kJump = false, jumpBuf = 0, touchDir = 0, bufferedTouchJump = false, bookOpen = false;
 const mouse = {x:-999, y:-999, inside:false};
 
@@ -234,7 +254,7 @@ addEventListener('keydown', e=>{
   if (e.repeat) { if(['Space','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); return; }
   keys[e.code] = true;
   if (['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab'].includes(e.code)) e.preventDefault();
-  if (state === 'title') { if (e.code === 'Space' || e.code === 'Enter') harbor.open(); return; }
+  if (state === 'title') { if (e.code === 'Space' || e.code === 'Enter') missionSelect.open(); return; }
   if (state === 'win' || state === 'clear') {
     if (e.code === 'Enter' && (!e.target || e.target.tagName!=='BUTTON')) {e.preventDefault();continueJourney();}
     return;
@@ -248,7 +268,8 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { pressJump(); }
-  if (e.code === 'KeyR') { if (state==='play'||state==='dead') loadLevel(level, true); }
+  if(e.code==='KeyJ')elements.cast();
+  if (e.code === 'KeyR') { if (state==='play'||state==='dead') retryCurrentArea(); }
   if (e.code === 'KeyE' || e.code === 'Tab') { if (state === 'play') openEditor(); }
   if (e.code === 'Escape' || e.code === 'KeyP') { if (state === 'play') openMenu(); }
   if (e.code === 'KeyM') { setMuted(!muted); toast(muted?'静音':'有声'); }
@@ -282,6 +303,7 @@ cv.addEventListener('contextmenu', e=> e.preventDefault());
 cv.addEventListener('pointerdown', e=>{
   if (state !== 'play' || editing || menuOpen || bookOpen) return;
   const p = screenToWorld(e);
+  if(isCampaign()){const b=bounds();if(p.x>=b.x-12&&p.x<=b.x+b.w+12&&p.y>=b.y-12&&p.y<=b.y+b.h+12)forge.open();return;}
   if (e.pointerType === 'mouse'){
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
@@ -363,6 +385,7 @@ function clearInput(){
   for (const k in keys) keys[k]=false;
   jumpBuf=0; bufferedTouchJump=false;
   endMove(); jEnd(); releaseJump();
+  skillPointer=null;if(elements)elements.hold(false);
 }
 
 const uBtn = $('btnUndo');
@@ -658,7 +681,31 @@ const LEVELS = [
            {c:[41,28],m:'fire'},{c:[43,28],m:'grass'},{c:[44,28],m:'water'}],
     enemies:[],exit:[76,6,3,3],
   },
-  // ══════════ 试炼(比主线更紧:材料只够刚好,容错低) ══════════
+];
+// 老关卡保留入门路线,把难度放进可选的高处与绕路收集。
+const EARLY_SEEDS = [
+  [[19,33],[40,37],[65,30]], [[21,30],[35,25],[48,38]], [[16,31],[39,38],[62,31]],
+  [[21,30],[31,24],[41,30]], [[18,34],[48,32],[60,38]], [[20,38],[26,40],[62,31]],
+  [[9,32],[42,20],[74,6]],
+];
+EARLY_SEEDS.forEach((list,i)=>{ LEVELS[i].seeds=list; });
+// 通过第一次形状解谜后留一个歇脚点，后半段失败不用重复已经学会的动作。
+LEVELS[0].devices = [{type:'checkpoint',x:36,y:40}];
+LEVELS[4].devices = [{type:'checkpoint',x:40,y:40}];
+LEVELS[6].devices = [{type:'checkpoint',x:39,y:23}];
+function levelHint(){
+  const L = LEVELS[level]; if (!L) return '';
+  return (touchMode && L.hintTouch) ? L.hintTouch : (L.hint || '');
+}
+
+// 提示由当前身体、位置和机关决定；允许自由试路，不要求依次打勾。
+// 元素远征：多层战场、可选高处收集与需要破盾的首领。
+window.GraftElements.BOSSES.forEach((boss,i)=>LEVELS.push({
+ name:chapterNames[i],sub:'整备 · 探索 · 前线 · 关底任务',theme:['ember','frost','earth','fungal','dusk'][i],boss:i,lock:true,
+ ...window.GraftExpedition.roomMap(i,0),items:[],enemies:[],hint:'点拼装取豆，把两颗材料做成装备。每个世界六关，第六关挑战首领；每关节奏目标约两分钟。点元素切换，按住攻击自动瞄准。'
+}));
+// 试炼关:不计入主线进度,只能从「选关」直接进;Boss 关索引因此保持 12..16
+const TRIAL_LEVELS = [
   {
     name:'试炼 1 · 四印', sub:'压板 → 水 → 火', theme:'violet',
     hint:'压板要重量 ≥ 12.5:两块石头就够 · 水冷却红门 · 火烧开荆棘。材料只够用一次,别浪费',
@@ -735,23 +782,69 @@ const LEVELS = [
     exit:[72,37,3,3],
   },
 ];
-// 老关卡保留入门路线,把难度放进可选的高处与绕路收集。
-const EARLY_SEEDS = [
-  [[19,33],[40,37],[65,30]], [[21,30],[35,25],[48,38]], [[16,31],[39,38],[62,31]],
-  [[21,30],[31,24],[41,30]], [[18,34],[48,32],[60,38]], [[20,38],[26,40],[62,31]],
-  [[9,32],[42,20],[74,6]],
-];
-EARLY_SEEDS.forEach((list,i)=>{ LEVELS[i].seeds=list; });
-// 通过第一次形状解谜后留一个歇脚点，后半段失败不用重复已经学会的动作。
-LEVELS[0].devices = [{type:'checkpoint',x:36,y:40}];
-LEVELS[4].devices = [{type:'checkpoint',x:40,y:40}];
-LEVELS[6].devices = [{type:'checkpoint',x:39,y:23}];
-function levelHint(){
-  const L = LEVELS[level]; if (!L) return '';
-  return (touchMode && L.hintTouch) ? L.hintTouch : (L.hint || '');
-}
+TRIAL_LEVELS.forEach(L=>{ L.trial = true; LEVELS.push(L); });
 
-// 提示由当前身体、位置和机关决定；允许自由试路，不要求依次打勾。
+function remainingPylons(){return devices.filter(d=>d.type==='pylon'&&!d.used);}
+function arenaSurfaces(){return LEVELS[level].rects.filter(r=>r.t==='stone'||r.t==='crumble').map(r=>({x:r.x===0?8:r.x*8,y:r.y*8,w:r.x===0?r.w*8-16:r.w*8}));}
+function hitPylon(target,key){const d=target.source;if(d.used)return;if(d.order!==undefined&&remainingPylons().some(other=>other.order<d.order)){toast('先完成前面的供能器');return;}if(key!==d.mat&&!(key==='steam'&&d.mat==='water')){toast(d.label+'：切换'+MAT[d.mat].label+'元素攻击');return;}d.hits=(d.hits||0)+1;burst(d.x+8,d.y-12,MAT[d.mat].c,8,75,2);if(d.hits>=(d.requiredHits||2)){d.used=true;elements.boost(6);toast(d.label+'已开启，获得短时充能');}else toast('已命中 '+d.hits+'/'+(d.requiredHits||2));}
+function roomCraftGoal(){return campaignRoom===0?1:campaignRoom===2?2:0;}
+function campaignStep(){
+ const m=currentMission();
+ if(campaignRoom===3){
+  if(isBossMission())return {title:elements.boss.hp<=0?'首领击破，前往出口':!journeyReady()?'前方首领：'+elements.boss.name:elements.boss.action||'看预警换位，用对应元素破盾',tip:'每个世界的第六关是首领战。青旗保存当前进度，留意高台预警。'};
+  if(!exitLocked)return {title:'任务完成，前往右侧出口',tip:'这一关将独立结算；下一关保留世界解锁进度。'};
+  if(m.kind==='carry')return {title:field.carry?'带能源核前往右侧高台接收器':'拾起左侧发光能源核',tip:'靠近自动拾取与交付；运送时移动稍慢，可以跳跃和攻击。'};
+  if(m.kind==='seek')return {title:'寻回能源片 '+devices.filter(d=>d.type==='shard'&&d.used).length+'/3',tip:'三枚能源片在不同高台，靠近即可拾取。'};
+  if(m.kind==='defend')return {title:'守住灯台 '+Math.floor(field.progress)+'/'+field.duration+' 秒',tip:'留在灯台附近，清理靠近的敌人；四次袭击全部击退才完成。'};
+  const d=remainingPylons()[0];return {title:d?d.label+' · 用'+MAT[d.mat].label+'攻击':'清理剩余追兵',tip:m.tip};
+ }
+ if(expedition.state.crafted<roomCraftGoal())return {title:campaignRoom===0?'先拼一件装备，再出发':'升级或拼第二件装备',tip:'火＋火：烬雀·双生焰铳；水＋火：雾鲸·高压蒸汽炮。组件装上后自动生效。'};
+ if(enemies.length||journeyWave<waveGoal())return {title:regionName()+' · 清理守卫并向右探索',tip:'本区防线 '+Math.min(journeyWave+1,waveGoal())+'/'+waveGoal()+'。任务 '+m.label+'，目标节奏约两分钟。'};
+ const cache=devices.find(d=>d.type==='salvage'&&!d.used);if(campaignRoom===0&&cache)return {title:'开启补给舱 '+devices.filter(d=>d.type==='salvage'&&d.used).length+'/3',tip:'三处补给舱在不同高台，靠近自动开启；得到的拼豆可以升级装备。'};
+ const d=remainingPylons()[0];if(d)return {title:d.label+' · 用'+MAT[d.mat].label+'命中两次',tip:'登上同层高台，平台会挡住弹道。'};
+ if(campaignRoom===2&&!field.done)return {title:field.mode==='escort'?'护送光核 '+Math.floor(field.progress)+'/'+field.duration:'守住中继灯 '+Math.floor(field.progress)+'/'+field.duration,tip:'靠近发光目标，击退四次袭击；高台也在保护范围内。'};
+ return {title:'区域完成，前往下一处 →',tip:'下一处：'+regionName(campaignRoom+1)+'。装备与用时会继续累计。'};
+}
+function spawnAmbush(wave){
+ const before=enemies.length;spawnJourneyWave(10+wave);
+ enemies.slice(before).forEach((e,i)=>{e.uid='event-'+campaignRoom+'-'+wave+'-'+i;e.x=wave%2?Math.min(560,field.x+112+i*22):Math.max(80,field.x-108-i*22);e.y=300;e.hp=e.maxhp=e.elite?12:8;e.role=i===0?'ranged':'melee';e.shootT=1.6;while(boxSolid(e.x,e.y,e.w,e.h)&&e.y>80)e.y-=8;});
+}
+function updateFieldTask(dt){
+ if(!isCampaign()||!field)return;
+ const b=bounds(),cx=b.x+b.w/2,foot=b.y+b.h;
+ if(campaignRoom===2&&journeyWave>=waveGoal()&&!remainingPylons().length||campaignRoom===3&&missionStage===2){
+  if(campaign.encounterStep(field,dt,b,enemies))spawnAmbush(field.bursts);
+  if(field.started&&!field.done&&field.t>=field.nextMark){field.nextMark+=5;elements.telegraph({x:cx-15,y:foot-38,w:30,h:38},.95);}
+  const beacon=devices.find(d=>d.type==='beacon');if(beacon)beacon.x=field.x;
+ }
+ for(const d of devices)if(d.type==='salvage'&&!d.used&&Math.abs(cx-d.x)<22&&Math.abs(foot-d.y)<32){d.used=true;for(let k=0;k<4;k++)expedition.salvage(d.mat,'cache-'+d.cacheId+'-'+k);elements.boost(5);saveCampaignRun();toast('补给舱开启 · '+MAT[d.mat].label+'豆已进入拼装料堆');}
+ if(campaignRoom===3&&!isBossMission()){
+  for(const d of devices){if(d.type==='cargo'&&!d.used&&Math.abs(cx-d.x)<22&&Math.abs(foot-d.y)<32){d.used=true;field.carry=true;toast('能源核已拾取 · 运往右侧高台');}
+   if(d.type==='receiver'&&field.carry&&Math.abs(cx-d.x-d.w/2)<24&&Math.abs(foot-d.y)<32){field.carry=false;field.delivered=true;d.used=true;toast('能源核已送达');}
+   if(d.type==='shard'&&!d.used&&Math.abs(cx-d.x)<22&&Math.abs(foot-d.y)<32){d.used=true;burst(d.x,d.y-12,'#f5d69b',12,80,2);}
+  }
+ }
+}
+function updateCampaignRoute(){
+ if(!isCampaign())return;
+ if(campaignRoom===3){
+  journeyWave=0;
+  if(isBossMission()){if(bounds().x>370)journeyAwake=true;return;}
+  const kind=currentMission().kind;
+  const done=kind==='carry'?field.delivered:kind==='seek'?devices.filter(d=>d.type==='shard').every(d=>d.used):kind==='defend'?field.done:!remainingPylons().length;
+  if(done&&!enemies.length)exitLocked=false;return;
+ }
+ if(!remainingPylons().length)for(const d of devices)if(d.type==='gate')d.open=true;
+ if(journeyWave>=waveGoal()&&!enemies.length&&!remainingPylons().length&&expedition.state.crafted>=roomCraftGoal()&&(campaignRoom!==2||field.done)&&!devices.some(d=>d.type==='salvage'&&!d.used))exitLocked=false;
+}
+function saveCampaignRun(){if(isCampaign())store.set('campaignRun',{version:2,level,stage:missionStage,room:campaignRoom,elapsed:missionElapsed,found:missionFound,kit:expedition.snapshot()});}
+function pendingCampaign(){const s=store.get('campaignRun',null);if(!s||![1,2].includes(s.version)||!Number.isInteger(s.level)||s.level<12||s.level>16||!Number.isInteger(s.room)||s.room<0||s.room>3||!window.GraftExpedition.valid(s.kit)||s.kit.chapter!==s.level-12||s.kit.room!==s.room)return null;
+ const stage=s.version===1?5:s.stage;if(!Number.isInteger(stage)||stage<0||stage>5)return null;return {...s,stage,elapsed:Number.isFinite(s.elapsed)?Math.max(0,s.elapsed):0,found:Number.isInteger(s.found)?Math.max(0,s.found):0};}
+function retryCurrentArea(){loadLevel(level,true,campaignRoom,isCampaign()?roomEntryKit:null,missionStage);}
+function advanceExpeditionRoom(){
+ if(!isCampaign()||campaignRoom>=3||exitLocked)return false;
+ const next=campaignRoom+1,kit=expedition.snapshot();missionFound+=seeds.filter(s=>s.got).length;loadLevel(level,true,next,kit,missionStage);return true;
+}
 const JOURNEY_SKILLS = ['把身体变成钥匙','让重量帮你开路','用水保护自己','把硬材料放在接触面',
   '按地形切换身体形状','在窄路里带好保护层','在轻装与重装间切换','借植物的力量登高',
   '开门后卸重，搭浮台旅行','用水改变火焰路线','把两种材料组合起来','让四种材料接力开路'];
@@ -761,6 +854,7 @@ const JOURNEY_TEASERS = ['缝隙会检验你的形状','下一关，重量也能
   '下一关，开门后收回石豆，搭浮台上山。','下一关，水豆能关闭喷口、冷却红门。',
   '下一关，火与草会一起打开新的道路。','最后一关，把四种材料的本领串起来。'];
 function routeStep(){
+  if(isCampaign())return campaignStep();
   const b=bounds(), x=(b.x+b.w/2)/CELL, foot=(b.y+b.h)/CELL;
   const step=(title,tip)=>({title,tip});
   const exit=()=>step('走进发光的出口','光种是可选挑战。可以先过关，再回来试试高处和支路。');
@@ -820,7 +914,7 @@ function rewardNote(){
 function refreshJourney(){
   const s=routeStep();
   if($('stepGoal').textContent!==s.title)$('stepGoal').textContent=s.title;
-  const extra='可选探索 · '+rewardNote();
+  const extra=isCampaign()?s.tip:'可选探索 · '+rewardNote();
   if($('stepExtra').textContent!==extra)$('stepExtra').textContent=extra;
 }
 
@@ -854,7 +948,8 @@ function updateDevices(dt){
 function snapshotCheckpoint(index){
   checkpoint = {index,px:P.px,py:P.py,mask:Array.from(P.mask),bag:Object.assign({},P.bag),sel:P.sel,
     grid:Array.from(grid),devices:devices.map(d=>Object.assign({},d)),seeds:seeds.map(s=>Object.assign({},s)),
-    items:items.map(i=>Object.assign({},i)),enemies:enemies.map(e=>Object.assign({},e)),exitLocked};
+    items:items.map(i=>Object.assign({},i)),enemies:enemies.map(e=>Object.assign({},e)),exitLocked,
+    campaign:LEVELS[level].boss!==undefined?{wave:journeyWave,element:chosenElement,room:campaignRoom,kit:expedition.snapshot(),stage:missionStage,field:JSON.parse(JSON.stringify(field))}:null};
   toast('复活点已点亮 · 散架后从这里继续');
   arp([523,784,1046],70); vibrate(20);
 }
@@ -862,7 +957,10 @@ function respawnCheckpoint(){
   // 硬核模式:没有青旗,散架就从关卡开头重来
   const hardMode = store.get('hard', false);
   const saved = hardMode ? null : checkpoint;
-  loadLevel(level,true);
+  loadLevel(level, true,
+    saved&&saved.campaign?saved.campaign.room:campaignRoom,
+    saved&&saved.campaign?saved.campaign.kit:isCampaign()?expedition.snapshot():roomEntryKit,
+    saved&&saved.campaign?saved.campaign.stage:missionStage);
   if (!saved) { toast(hardMode ? '硬核:从头再来' : '再试一次 · '+(run.lastAdvice || routeStep().tip)); return; }
   checkpoint = saved;
   P.mask.set(saved.mask); P.bag = Object.assign({},saved.bag); P.sel = saved.sel;
@@ -871,6 +969,7 @@ function respawnCheckpoint(){
   devices=saved.devices.map(d=>Object.assign({},d)); seeds=saved.seeds.map(s=>Object.assign({},s));
   items=saved.items.map(i=>Object.assign({},i)); enemies=saved.enemies.map(e=>Object.assign({},e));
   exitLocked=saved.exitLocked; hist=[];
+  if(saved.campaign){if(saved.campaign.field)field=JSON.parse(JSON.stringify(saved.campaign.field));journeyWave=saved.campaign.wave;chosenElement=saved.campaign.element;journeyAwake=false;refreshElements();}
   camSnap(); syncBag(); syncUndo();
   toast('从青旗继续 · 已解锁的拼豆图纸和光种进度都还在');
 }
@@ -948,6 +1047,7 @@ function interactDevices(dt){
   const b = bounds(); if (b.empty) return;
   for (const d of devices){
     const over = b.x+b.w>d.x && b.x<d.x+d.w;
+    if(d.type==='camp'&&!d.used&&Math.abs(b.x+b.w/2-d.x-d.w/2)<18&&Math.abs(b.y+b.h-d.y)<10){d.used=true;elements.boost(12);toast('充能已获得：短时间内攻击更快');}
     interactMaterial(d,dt,b);
     const onTop = over && Math.abs(b.y+b.h-d.y)<2 && P.vy>=0;
     if (d.type === 'spring' && (!d.needs || d.lit) && onTop && d.cd<=0){
@@ -998,7 +1098,7 @@ function interactDevices(dt){
   // 收集与战斗结算后再存档,避免复活时复制材料;仅在安全站稳时激活。
   if (P.onGround && P.invuln<=0){
     devices.forEach((d,index)=>{
-      if (d.type==='checkpoint' && !d.lit && rectOverlap(bounds(),{x:d.x-6,y:d.y-26,w:20,h:27})){
+      if (d.type==='checkpoint' && !d.lit && (!d.requiresCleared||(journeyWave>=waveGoal()&&!remainingPylons().length)) && rectOverlap(bounds(),{x:d.x-6,y:d.y-26,w:20,h:27})){
         d.lit=true; snapshotCheckpoint(index);
       }
     });
@@ -1054,6 +1154,14 @@ function drawDevices(){
   for (const d of devices){
     if (d.x+d.w<cam.x-50 || d.x>cam.x+VIEW_W+50) continue;
     const x=Math.round(d.x), y=Math.round(d.y);
+    if(['cargo','receiver','shard','beacon','salvage'].includes(d.type)){
+      const color=d.used?'#587582':d.type==='beacon'?'#96e3d8':'#f1d18f';
+      ctx.fillStyle='#233d50';ctx.fillRect(x-4,y-3,d.w+8,3);ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+d.w/2,y-15,d.type==='beacon'?7:5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=color;ctx.strokeRect(x-2,y-25,d.w+4,24);
+      const label=d.type==='salvage'?(d.used?'已开启':'补给舱'):d.type==='cargo'?(d.used?'已拾取':'能源核'):d.type==='receiver'?(d.used?'已送达':'接收器'):d.type==='shard'?(d.used?'已寻回':'能源片'):field&&field.done?'已点亮':field?'供能 '+Math.floor(field.progress)+'/'+field.duration:'中继灯';ctx.fillStyle='#e6eff2';ctx.fillText(label,x+d.w/2,y-30);
+    }
+    if(d.type==='cache'){ctx.fillStyle='#47657a';ctx.fillRect(x,y-18,d.w,18);ctx.fillStyle='#e1ba82';ctx.fillRect(x+4,y-14,d.w-8,4);ctx.fillStyle='#dceef4';ctx.fillText('拼装台 · 点拼装',x+d.w/2,y-24);}
+    if(d.type==='pylon'){const c=MAT[d.mat].c;ctx.fillStyle=d.used?'#43596a':c;ctx.fillRect(x,y-24,d.w,24);ctx.fillStyle='#172a3c';ctx.fillRect(x+3,y-21,d.w-6,16);ctx.fillStyle=d.used?'#617785':c;ctx.beginPath();ctx.arc(x+d.w/2,y-13,4,0,Math.PI*2);ctx.fill();ctx.fillStyle='#e2eff7';ctx.fillText(d.used?'已解除':MAT[d.mat].label+' '+(d.hits||0)+'/'+(d.requiredHits||2),x+d.w/2,y-29);}
+    if(d.type==='camp'){ctx.fillStyle=d.used?'#54677a':'#8bdce7';ctx.fillRect(x+3,y-12,18,12);ctx.fillStyle='#e5f9ff';ctx.fillRect(x+10,y-17,4,14);ctx.fillText(d.used?'已充能':'充能',x+12,y-22);}
     if (d.type==='spring'){
       const press=d.cd>0?3:0;
       const asleep=d.needs && !d.lit;
@@ -1180,7 +1288,7 @@ const P = {
   mask: new Uint8Array(MW*MH),
   pop: new Float32Array(MW*MH),       // 每格贴上时的弹跳动画
   vx:0, vy:0, onGround:false, coyote:0, face:1,
-  bag:{meat:0,grass:0,stone:0,water:0,fire:0},
+  bag:{meat:0,grass:0,stone:0,water:0,fire:0,light:0},
   sel:'stone',
   invuln:0, denyT:0, flash:0, shake:0,
   eyeT:0, blink:0,
@@ -1207,7 +1315,7 @@ function weight(){
   for (let k=0;k<MW*MH;k++) if (P.mask[k]) s += BY_ID[P.mask[k]].w;
   return s;
 }
-function moveSpeed(){ return Math.max(62, 118 - Math.max(0, weight()-6)*1.9); }
+function moveSpeed(){ return Math.max(62, 118 - Math.max(0, weight()-6)*1.9)*(isCampaign()&&field&&field.carry ? .85 : 1); }
 function jumpPower(){
   const h = clamp(64 - Math.max(0, weight()-6)*2.3, 16, 66);
   return Math.sqrt(2*GRAV*h);
@@ -1352,8 +1460,8 @@ function ember(x,y,c){
   if (particles.length > MAX_PARTICLES) return;
   particles.push({x,y,vx:(Math.random()-0.5)*14,vy:-20-Math.random()*30,life:0.6+Math.random()*0.6,max:1.2,c:c||'#ffb02e',s:1,g:-40,soft:true,glow:true});
 }
-function addItem(x,y,mat){
-  items.push({x,y,mat,t:Math.random()*6, vy:-40, vx:(Math.random()-0.5)*40});
+function addItem(x,y,mat,salvageId){
+  const item={x,y,mat,t:Math.random()*6, vy:-40, vx:(Math.random()-0.5)*40};if(salvageId)item.salvageId=salvageId;items.push(item);
 }
 function floater(x,y,text,color){
   floaters.push({x,y,text,c:color||'#fff',t:0});
@@ -1378,14 +1486,25 @@ const stats = { deaths: 0, start: 0 };
 let run = {level:-1,deaths:0,lastAdvice:''};
 let nextJourneyRefresh=0;
 
-function loadLevel(idx, retry){
+function loadLevel(idx, retry, room=0, kit=null, stage=0){
+  const oldLevel=level,oldStage=missionStage;
+  if(forge&&forge.active)forge.close();
   level = clamp(idx, 0, LEVELS.length-1);
   const L = LEVELS[level];
+  campaignRoom=L.boss===undefined?0:room;missionStage=L.boss===undefined?0:stage;
+  if(!retry||oldLevel!==level||oldStage!==stage){missionElapsed=0;missionFound=0;}
+  field=campaign.encounter(stage%2===0?'escort':'defend');if(room===3&&stage===2)field=campaign.encounter('defend',28);
+  if(L.boss!==undefined){
+    Object.assign(L,window.GraftExpedition.roomMap(L.boss,room,stage));
+    if(kit&&expedition.restore(kit)){if(expedition.state.room!==room)expedition.enter(room);}else{expedition.reset(L.boss,stage);if(room)expedition.enter(room);}
+    roomEntryKit=expedition.snapshot();
+  }
   if(!retry || run.level!==level)run={level,deaths:0,lastAdvice:''};
   $('stageClear').classList.add('hide');
   $('wrap').inert=false;$('pad').inert=false;
   document.body.classList.remove('celebrating');
   clearInput();
+  document.body.classList.toggle('element-battle',L.boss!==undefined);
   themeName = L.theme || 'violet'; TH = THEMES[themeName];
   checkpoint = null;
   loadDevices(L);
@@ -1397,8 +1516,10 @@ function loadLevel(idx, retry){
     for (let y=r.y;y<r.y+r.h;y++) for (let x=r.x;x<r.x+r.w;x++) setT(x,y,t);
   }
   spawnPlayer(L.start[0], L.start[1]);
-  P.bag = {meat:0,grass:0,stone:0,water:0,fire:0};
+  P.bag = {meat:0,grass:0,stone:0,water:0,fire:0,light:0};
   P.sel = 'stone';
+  if(L.boss!==undefined)P.bag={meat:6,stone:4,water:4,fire:4,grass:4,light:4};
+  elements.reset(L.boss===undefined?-1:L.boss);if(L.boss!==undefined&&campaignDifficulty==='hard'){elements.boss.hp=78;elements.boss.max=78;}
   items = []; enemies = []; particles = []; floaters = []; drips = []; hist = []; tut = 0; tutCuts = 0;
   for (const it of (L.items||[])) addItem(it.c[0]*CELL+4, it.c[1]*CELL+4, it.m);
   for (const e of (L.enemies||[])){
@@ -1417,20 +1538,28 @@ function loadLevel(idx, retry){
   buildLevelArt(level*3.7+1.3);
   camSnap();
   state = 'play';
+  chosenElement=null;journeyWave=0;journeyAwake=false;
+  if(L.boss!==undefined){switchElement('water');if(room!==3)spawnJourneyWave(0);else if(stage!==5&&stage!==2)spawnFinalGuards();refreshElements();}
+  applyViewMode();
+  $('btnEdit').textContent=L.boss!==undefined?'拼装':'豆板';
+  $('elementDock').classList.toggle('hide',L.boss===undefined);
   timer = 0; shake = 0; freeze = 0; levelT = 0;
   $('lv').textContent = String(level+1).padStart(2,'0') + ' / ' + String(LEVELS.length).padStart(2,'0');
   refreshJourney();
   syncBag(); syncUndo();
+  if(L.boss!==undefined)showCard((L.boss+1)+'-'+(stage+1)+' · '+currentMission().name,regionName(room)+(room===3?' · '+(stage===5?elements.boss.name:currentMission().label):' · 装备随行'));
   if (!retry){
     if (level > store.get('unlocked', 0)) store.set('unlocked', level);
-    showCard(L.name, L.sub);
+    if(L.boss===undefined)showCard(L.name, L.sub);
     if (level > store.get('best', 0)) store.set('best', level);
   }
+  if(L.boss!==undefined)saveCampaignRun();
   if (AC) music.start(themeName);
 }
 
 function nextLevel(){
   if(state!=='play')return;
+  if(isCampaign()){if(campaignRoom<3){advanceExpeditionRoom();return;}if(isBossMission()?elements.boss.hp>0:exitLocked)return;store.set('campaignRun',null);}
   const found=seeds.filter(s=>s.got).length;
   const bestSeeds = store.get('seeds', {});
   const previousSeeds=bestSeeds[level] || 0;
@@ -1440,16 +1569,17 @@ function nextLevel(){
   const improved=old && run.deaths<old.deaths;
   records[level]={clears:(old?old.clears:0)+1,deaths:old?Math.min(old.deaths,run.deaths):run.deaths};
   store.set('journeyRecords',records);
-  const final=level+1>=LEVELS.length;
-  store.set('unlocked',Math.max(store.get('unlocked',0),Math.min(level+1,LEVELS.length-1)));
-  store.set('best',final?0:Math.max(store.get('best',0),level+1));
+  if(isBossMission()){store.set('elementChapter',Math.max(store.get('elementChapter',0),Math.min(4,LEVELS[level].boss+1)));}
+  const campaignLen=LEVELS.filter(L=>!L.trial).length;
+  const final=level+1>=campaignLen&&(!isCampaign()||missionStage===5);
+  if(!isCampaign()||isBossMission()){store.set('unlocked',Math.max(store.get('unlocked',0),Math.min(level+1,LEVELS.length-1)));store.set('best',final?0:Math.max(store.get('best',0),level+1));}
   state = final?'win':'clear'; timer = 0;
   closeEditor(true);
   clearInput();
   $('card').classList.remove('show');
   $('clearChapter').textContent=LEVELS[level].name+' · '+(final?'旅途完成':'这一段，走通了');
   $('clearHeading').textContent=final?'把学会的，都玩出来了':'又走通了一条路';
-  $('clearSkill').textContent='这一关的本领：'+JOURNEY_SKILLS[level];
+  $('clearSkill').textContent=isCampaign()?'四区突破 · 拼装装备 · 首领击破':'这一关的本领：'+JOURNEY_SKILLS[level];
   $('clearSeeds').textContent='✦'.repeat(found)+'◇'.repeat(seeds.length-found);
   $('clearSeeds').setAttribute('aria-label','本次光种 '+found+' / '+seeds.length+' 颗');
   $('clearBest').textContent=bestSeeds[level]+'/'+seeds.length;
@@ -1458,10 +1588,20 @@ function nextLevel(){
     improved?'比之前少散架 '+(old.deaths-run.deaths)+' 次，走得更稳了。':
     run.deaths===0?'这一次，全程没有散架。':old?'又走通了一次。试试换一种形状，找找另一条路。':'试过 '+run.deaths+' 次散架后，你还是找到了办法。';
   $('clearReward').textContent=rewardNote();
-  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':JOURNEY_TEASERS[level+1];
+  $('clearNextTease').textContent=final?'还可以回到选关，探索遗漏的光种，完成自己的拼豆图册。':(JOURNEY_TEASERS[level+1]||'继续探索，通关后会解锁新的元素。');
+  if(LEVELS[level].boss!==undefined){const chapter=LEVELS[level].boss;$('clearNextTease').textContent=chapter<4?'下一章：'+chapterNames[chapter+1]+' · 解锁'+['草','岩','雾','光'][chapter]+'元素':'逐光之旅完成，可以回到选关继续探索。';}
   $('clearNext').textContent=final?'回到标题':'去下一关 →';
   const trail=$('clearTrail');trail.textContent='';
   LEVELS.forEach((L,i)=>{const done=records[i]&&records[i].clears>0;const el=document.createElement('span');el.className='trail-bead'+(done?' done':'')+(i===level?' current':'');el.textContent=i+1;el.setAttribute('aria-label',L.name+(done?'，已完成':'，尚未完成'));trail.appendChild(el);});
+  if(isCampaign()){
+    const m=currentMission(),totalFound=missionFound+found,progress=campaign.finish(missionProgress(),m.id,missionElapsed,run.deaths,totalFound);store.set('missionProgress',progress);
+    $('clearChapter').textContent=chapterNames[m.world]+' · '+(m.world+1)+'-'+(m.stage+1);
+    $('clearHeading').textContent=m.name+' · 完成';$('clearSkill').textContent=m.label+'任务 · 四段路线';
+    $('clearBest').textContent=campaign.clock(missionElapsed);$('clearBestLabel').textContent='本次用时 · 节奏目标约 02:00';
+    $('clearPraise').textContent='★'.repeat(progress.cleared[m.id].stars)+' · 最快 '+campaign.clock(progress.cleared[m.id].best)+' · 无散架、收集六枚光种可提升评价';
+    $('clearNextTease').textContent=m.stage<5?'下一关：'+campaign.mission(m.world,m.stage+1).name:m.world<4?'下一世界：'+chapterNames[m.world+1]:'三十关全部走通了，可以重玩挑战不同装备。';
+    trail.textContent='';for(let i=0;i<30;i++){const n=document.createElement('span');n.className='trail-bead'+(progress.cleared[i]?' done':'')+(i===m.id?' current':'');n.textContent=(Math.floor(i/6)+1)+'-'+(i%6+1);trail.appendChild(n);}
+  }
   $('stageClear').classList.remove('hide');
   $('wrap').inert=true;$('pad').inert=true;
   document.body.classList.add('celebrating');
@@ -1472,10 +1612,10 @@ function nextLevel(){
 }
 function continueJourney(){
   if(bookOpen || (state!=='clear'&&state!=='win'))return;
-  if(state==='win')showTitle();else loadLevel(level+1);
+  if(state==='win')showTitle();else if(isCampaign()&&missionStage<5)loadLevel(level,false,0,null,missionStage+1);else loadLevel(level+1);
 }
 $('clearNext').addEventListener('click',continueJourney);
-$('clearRetry').addEventListener('click',()=>{if(!bookOpen&&(state==='clear'||state==='win'))loadLevel(level);});
+$('clearRetry').addEventListener('click',()=>{if(!bookOpen&&(state==='clear'||state==='win'))loadLevel(level,false,0,null,missionStage);});
 $('clearBook').addEventListener('click',()=>{if(state==='clear'||state==='win')beadBook.open();});
 $('stageClear').addEventListener('keydown',e=>{
   if(e.key!=='Tab')return;
@@ -1609,6 +1749,7 @@ edx.imageSmoothingEnabled = false;
 const ED = 32; // 每格 32px
 let editSnapshot=null;
 function openEditor(){
+  if(isCampaign()&&forge){forge.open();return;}
   if (state !== 'play' || editing || menuOpen || bookOpen) return;
   editSnapshot={mask:Array.from(P.mask).join(','),jump:jumpPower()*jumpPower()/(2*GRAV*CELL)};
   editing = true; edEl.classList.remove('hide');
@@ -1731,6 +1872,7 @@ function drawEditor(){
   const height=bounds().h;
   $('edSlim').textContent=height>CELL*2?'瘦身钻洞':height>CELL?'再瘦一层':'已是单层';
   $('edSlim').disabled=height<=CELL;
+  const detected=window.GraftElements.skill(P.mask);$('edSkillStatus').textContent=LEVELS[level].boss!==undefined?'旅途技能在元素栏直接切换；这里仅调整身体外形。':detected?'当前技能：'+window.GraftElements.SKILLS[detected].name+' · 改好后按住技能键':'两颗同元素相连产生技能；火水相邻产生蒸汽';
   const w = weight();
   $('edW').textContent = '跳高约 ' + (jumpPower()*jumpPower()/(2*GRAV*CELL)).toFixed(1) + ' 格 · 重 ' + w.toFixed(1) + (level === 1 || level === 4 ? (w >= 12.5 ? ' · 够压塌地板' : ' · 压塌地板要 12.5') : '');
 }
@@ -1743,7 +1885,8 @@ function openMenu(){
   closeEditor(true);
   menuOpen = true; menuEl.classList.remove('hide');
   clearInput();
-  $('pmLevel').textContent = LEVELS[level].name;
+  $('pmLevel').textContent = LEVELS[level].name+(isCampaign()?' · '+(campaignRoom+1)+'/4 '+regionName():'');
+  $('pmRetry').textContent=isCampaign()?'重来当前区域':'重来本关';
   const step=routeStep();
   $('pmGoal').textContent=step.title;
   $('pmAdvice').textContent=step.tip;
@@ -1756,13 +1899,13 @@ function openMenu(){
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'lvb' + (i === level ? ' cur' : '') + (i > un ? ' todo' : '');
     const stars = (store.get('seeds', {})[i] || 0);
-    b.textContent = L.name.split(' · ')[0];
+    b.textContent = String(i+1).padStart(2,'0')+' · '+L.name.split(' · ').pop();
     if (stars){ const badge=document.createElement('small'); badge.textContent='✦'.repeat(stars); b.appendChild(badge); }
     b.title = L.name + ' · 最佳光种 ' + stars + '/3' + (i > un ? ' · 还没通关' : '');
     const record=store.get('journeyRecords',{})[i];
     if(record){const badge=document.createElement('small');badge.textContent=record.deaths===0?'无散架':'已走通';b.appendChild(badge);}
     b.addEventListener('click', ()=>{ closeMenu(true); loadLevel(i); });
-    grid.appendChild(b);
+    if(i<12)grid.appendChild(b);
   });
   tone(500,380,0.06,'triangle',0.04);
 }
@@ -1774,7 +1917,7 @@ function closeMenu(silent){
 $('btnPause').addEventListener('click', ()=>{ ac(); menuOpen ? closeMenu() : openMenu(); });
 $('btnGuide').addEventListener('click',()=>openMenu());
 $('pmResume').addEventListener('click', ()=> closeMenu());
-$('pmRetry').addEventListener('click', ()=>{ closeMenu(true); loadLevel(level, true); });
+$('pmRetry').addEventListener('click', ()=>{ closeMenu(true); retryCurrentArea(); });
 $('pmSound').addEventListener('click', ()=>{ setMuted(!muted); $('pmSound').textContent = muted ? '声音:关' : '声音:开'; });
 $('pmHard').addEventListener('click', ()=>{ const v = !store.get('hard', false); store.set('hard', v); $('pmHard').textContent = v ? '硬核:开(无青旗)' : '硬核:关'; tone(v?620:320, v?380:620, .07, 'triangle', .04); });
 $('pmTitle').addEventListener('click', ()=>{ closeMenu(true); showTitle(); });
@@ -1845,6 +1988,7 @@ function kick(amount, dx, dy){
 }
 function damagePlayerNear(x,y,count){
   if (P.invuln > 0) return;
+  if(isCampaign()&&expedition.block()){P.invuln=1;burst(x,y,'#bac5dc',12,90,2);toast('岩盾抵挡 · 剩 '+expedition.state.shield+' 次');return;}
   let removed = 0;
   const b0 = bounds();
   const away = Math.sign((b0.x + b0.w/2) - x) || 1;
@@ -1972,7 +2116,10 @@ function updatePlayer(dt){
   }
 
   jumpBuf = Math.max(0, jumpBuf - dt);
-  if (jumpBuf > 0 && (P.onGround || P.coyote > 0)){
+  if(P.onGround)P.airJumpUsed=false;
+  const airJump=isCampaign()&&expedition.stats().airJump&&!P.airJumpUsed&&!P.onGround&&P.coyote<=0;
+  if (jumpBuf > 0 && (P.onGround || P.coyote > 0 || airJump)){
+    if(airJump){P.airJumpUsed=true;burst(b0.x+b0.w/2,b0.y+b0.h,'#a6cf88',9,90,2);}
     P.vy = -jumpPower() - GRAV*dt*0.5;
     P.touchFlight = bufferedTouchJump; bufferedTouchJump=false;
     P.onGround = false; P.coyote = 0; jumpBuf = 0;
@@ -2055,7 +2202,7 @@ function updatePlayer(dt){
   } else P.lavaT = 0;
 
   // 火烧自己
-  if (countMat('fire') > 0){
+  if (countMat('fire') > 0 && LEVELS[level].boss===undefined){
     P.burnT += dt;
     if (Math.random() < 0.25){
       for (let k2=0;k2<MW*MH;k2++) if (P.mask[k2]===MAT.fire.id && Math.random()<0.3){
@@ -2078,7 +2225,7 @@ function updatePlayer(dt){
   } else P.burnT = 0;
 
   // 水蒸发
-  if (countMat('water') > 0){
+  if (countMat('water') > 0 && LEVELS[level].boss===undefined){
     P.evapT += dt;
     if (P.evapT > 7){
       P.evapT = 0;
@@ -2213,14 +2360,15 @@ function updateEnemies(dt){
       burst(e.x+e.w/2, e.y+e.h/2, MAT[e.mat].c, 16, 150, 2);
       const m = MAT[e.mat];
       for (let c=0;c<(e.big?10:5);c++) chunk(e.x+Math.random()*e.w, e.y+Math.random()*e.h, m, (Math.random()-0.5)*200, 0);
-      for (let d=0; d<(e.big?4:2); d++) addItem(e.x+e.w/2 + (Math.random()-0.5)*e.w, e.y+e.h/2, e.mat);
+      for (let d=0; d<(e.big?4:2); d++) addItem(e.x+e.w/2 + (Math.random()-0.5)*e.w, e.y+e.h/2, e.mat,e.uid===undefined?undefined:e.uid+':'+d);
       kick(e.big?12:8, 0, 0);
       freeze = Math.max(freeze, e.big?0.12:0.06);
       tone(300, 60, 0.3, 'sawtooth', 0.08);
       noise(0.3, 0.07, 150, 2500);
       vibrate(e.big?80:40);
+      if(e.elite){elements.boost(10);toast('精英击破，获得攻击充能');}
       enemies.splice(n,1);
-      if (exitLocked && enemies.length === 0){
+      if (exitLocked && enemies.length === 0 && LEVELS[level].boss===undefined){
         exitLocked = false;
         toast('出口开了');
         arp([392,523,659], 80);
@@ -2270,6 +2418,7 @@ function updateItems(dt){
     if (b.x-10 < it.x && it.x < b.x+b.w+10 && b.y-10 < it.y && it.y < b.y+b.h+10){
       const key = MAT[it.mat] ? it.mat : 'meat';
       P.bag[key]++;
+      if(isCampaign()&&expedition.salvage(key,it.salvageId)){if(checkpoint&&checkpoint.campaign)checkpoint.campaign.kit=expedition.snapshot();saveCampaignRun();floater(it.x,it.y-16,'拼装料 +1','#e1b984');}
       ensureSel(key);
       burst(it.x, it.y, MAT[key].c, 5, 70, 1);
       pickCombo++; pickComboT = 0.8;
@@ -2318,6 +2467,7 @@ function updateParticles(dt){
 
 // ═════════════════════════════════════════════ 主更新
 function update(dt){
+  if(state==='play'&&isCampaign()&&!menuOpen&&!editing&&(!bookOpen||forge&&forge.active))missionElapsed+=dt;
   time += dt;
   if (freeze > 0){ freeze -= dt; dt *= 0.15; }
   shake *= Math.pow(0.0025, dt);
@@ -2346,6 +2496,13 @@ function update(dt){
   updatePlayer(dt);
   if (level === 0 && !tutDone && bounds().x/CELL > 52){ tutDone = true; store.set('tutDone', true); }
   updateEnemies(dt);
+  if(isCampaign()&&campaignRoom<3&&!enemies.length){
+    if(journeyWave<waveGoal()-1&&bounds().x>210+journeyWave*105){journeyWave++;spawnJourneyWave(journeyWave);toast('进入下一战斗段，留意远程预警');}
+    else if(journeyWave===waveGoal()-1){journeyWave=waveGoal();toast(remainingPylons().length?'小怪已清理，解除防线节点':'防线已突破，前往关底');}
+  }
+  updateFieldTask(dt);
+  updateCampaignRoute();
+  elements.update(dt);
   updateItems(dt);
   interactDevices(dt);
   if (state !== 'play') return;
@@ -2363,7 +2520,7 @@ function update(dt){
 }
 
 // ═════════════════════════════════════════════ 镜头
-const ZOOM = 2;
+let ZOOM = 2;
 let VIEW_W = CW/ZOOM, VIEW_H = CH/ZOOM;
 const cam = {x:0, y:0, look:0};
 
@@ -2823,14 +2980,14 @@ function drawPlayer(){
     const pop = P.pop[j*MW+i];
     const g = pop > 0 ? Math.round(pop*2) : 0;
     const x = Math.round(P.px + i*CELL + ox) - g, y = Math.round(P.py + j*CELL + oy) - g, s = CELL + g*2;
-    ctx.fillStyle = white ? '#ffffff' : m.c; ctx.fillRect(x,y,s,s);
+    ctx.fillStyle = white ? '#ffffff' : LEVELS[level].boss!==undefined&&id===1?'#8195aa':m.c; ctx.fillRect(x,y,s,s);
     if (!white){
-      ctx.fillStyle = m.c2; ctx.fillRect(x, y+s-2, s, 2);
+      ctx.fillStyle = (LEVELS[level].boss!==undefined&&id===1?'#40566e':m.c2); ctx.fillRect(x, y+s-2, s, 2);
       ctx.fillStyle='rgba(25,18,38,0.22)'; ctx.fillRect(x+s-1,y+1,1,s-2);
       ctx.fillStyle='rgba(255,245,220,0.16)'; ctx.fillRect(x+1,y+1,1,s-3);
       const topOpen = !cellOf(i,j-1);
       if (topOpen){ ctx.fillStyle = 'rgba(255,255,255,0.24)'; ctx.fillRect(x+1,y,s-2,1); }
-      cellTexture(id, x, y, i, j, topOpen);
+      if(!(LEVELS[level].boss!==undefined&&id===1))cellTexture(id, x, y, i, j, topOpen);
       ctx.fillStyle=m.edge;ctx.fillRect(x+3,y+3,2,2);
       ctx.fillStyle='rgba(255,245,220,.65)';ctx.fillRect(x+2,y+2,2,1);
     }
@@ -2847,7 +3004,7 @@ function drawPlayer(){
     if (!cellOf(i+1,j)) ctx.fillRect(x+CELL-1,y-1,2,CELL+2);
   }
 
-  if(!born)drawExplorerFace(b,cellOf);
+  if(!born){if(LEVELS[level].boss!==undefined){const core=[];for(let k=0;k<64;k++)if(P.mask[k]===1)core.push(k);const cb=core.length?{x:P.px+Math.min(...core.map(k=>k%8))*8,y:P.py+Math.min(...core.map(k=>k>>3))*8,w:(Math.max(...core.map(k=>k%8))-Math.min(...core.map(k=>k%8))+1)*8,h:(Math.max(...core.map(k=>k>>3))-Math.min(...core.map(k=>k>>3))+1)*8}:b;window.GraftPresentation.rig(ctx,cb,chosenElement,P.face);window.GraftExpedition.drawGear(ctx,cb,expedition.state.gear);if(field&&field.carry){ctx.fillStyle='#f1d18f';ctx.beginPath();ctx.arc(cb.x+cb.w/2,cb.y-8,4,0,Math.PI*2);ctx.fill();}}else drawExplorerFace(b,cellOf);}
   if(!born && beadBook.charm){
     ctx.strokeStyle='#e4c49a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(b.x+b.w-1,b.y+b.h-7);ctx.lineTo(b.x+b.w+5,b.y+b.h-4);ctx.stroke();
     ctx.drawImage(beadBook.charm,b.x+b.w+1,b.y+b.h-5,10,10);
@@ -3091,33 +3248,7 @@ function drawHudInCanvas(){
   if (mark !== lastMark){ lastMark = mark; wMark.style.display = mark ? 'block' : 'none'; }
 }
 let portraitReady=false;
-function drawTitlePortrait(){
-  if(portraitReady)return;
-  const c=$('portraitCv');c.width=240;c.height=116;
-  const p=c.getContext('2d');p.imageSmoothingEnabled=false;
-  p.save();p.translate(120,59);
-  p.strokeStyle='#62546f';p.lineWidth=1;p.beginPath();p.arc(0,0,45,0,Math.PI*2);p.stroke();
-  p.strokeStyle='#423a50';p.beginPath();p.arc(0,0,51,-Math.PI*0.85,Math.PI*0.85);p.stroke();
-  const mats=['grass','stone','meat','water','fire'];
-  mats.forEach((m,i)=>{const a=-Math.PI/2+i*Math.PI*2/5;drawMaterialBadge(m,Math.cos(a)*52,Math.sin(a)*52,p);});
-  p.scale(2.2,2.2);p.translate(-12,-12);
-  const body=[['grass','meat','stone'],['meat','meat','meat'],['water','meat','fire']];
-  for(let j=0;j<3;j++)for(let i=0;i<3;i++){
-    const m=MAT[body[j][i]],x=i*8,y=j*8;
-    p.fillStyle=m.edge;p.fillRect(x,y,8,8);p.fillStyle=m.c;p.fillRect(x+1,y+1,6,5);p.fillStyle=m.c2;p.fillRect(x+1,y+6,6,1);
-    p.fillStyle='rgba(255,246,216,.42)';p.fillRect(x+1,y+1,4,1);
-  }
-  p.fillStyle='#c8ef99';p.fillRect(3,-3,1,4);p.fillRect(1,-4,3,2);p.fillRect(4,-5,2,2);
-  p.fillStyle='#fff1af';p.fillRect(19,16,2,4);p.fillRect(18,18,4,3);
-  p.fillStyle='#72554b';p.fillRect(3,4,18,4);
-  for(const x of [5,14]){
-    p.fillStyle='#eed29b';p.fillRect(x-1,2,7,7);p.fillStyle='#547380';p.fillRect(x,3,5,5);
-    p.fillStyle='#c5eeee';p.fillRect(x,3,4,4);p.fillStyle='#2b3149';p.fillRect(x+2,4,2,3);p.fillStyle='#fff9d9';p.fillRect(x,3,2,1);
-  }
-  p.fillStyle='#f0ce9d';p.fillRect(11,5,3,1);p.fillStyle='#643e50';p.fillRect(8,11,10,2);p.fillStyle='#e4c399';p.fillRect(9,11,8,1);p.fillRect(15,12,2,3);
-  p.fillStyle='#514453';p.fillRect(10,17,6,6);p.fillStyle='#e9bb77';p.fillRect(11,18,4,4);p.fillStyle='#fff1bb';p.fillRect(12,18,2,3);
-  p.restore();portraitReady=true;
-}
+function drawTitlePortrait(){window.GraftPresentation.hero($('portraitCv'),'water');}
 
 // ═════════════════════════════════════════════ 渲染
 function render(){
@@ -3164,6 +3295,7 @@ function render(){
   drawEnemies();
   if (state === 'play' || state === 'clear' || editing) drawPlayer();
   drawParticles();
+  elements.draw(ctx);
   drawGhost();
   drawTutorial();
   const lights = collectLights();
@@ -3221,7 +3353,9 @@ function applyViewMode(){
   const compact = touchMode && !portrait && window.innerHeight<=600;
   const w = portrait ? 384 : compact ? 480 : 640, h = portrait ? 512 : compact ? 320 : 360;
   document.body.classList.toggle('tall', portrait);
-  if (w === CW && h === CH) return;
+  const targetZoom=isCampaign()?1.6:2;
+  if (w === CW && h === CH && targetZoom===ZOOM) return;
+  ZOOM=targetZoom;
   CW = w; CH = h;
   cv.width = CW; cv.height = CH; ctx.imageSmoothingEnabled = false;
   VIEW_W = CW/ZOOM; VIEW_H = CH/ZOOM;
@@ -3262,6 +3396,8 @@ fitVH();
 // ═════════════════════════════════════════════ 开始
 const ov = $('overlay');
 function refreshContinue(){
+  const pending=pendingCampaign();if(pending){$('btnCont').textContent='继续冒险 · '+campaign.mission(pending.level-12,pending.stage).name+' '+(pending.level-11)+'-'+(pending.stage+1);$('btnCont').classList.remove('hide');return;}
+  const progress=missionProgress();if(Object.keys(progress.cleared).length){const next=campaign.mission(Math.floor(progress.unlocked/6),progress.unlocked%6);$('btnCont').textContent='继续冒险 · '+next.name;$('btnCont').classList.remove('hide');return;}
   const best = store.get('best', 0);
   if (best > 0 && best < LEVELS.length){
     $('btnCont').textContent = '继续 · ' + LEVELS[best].name.split(' · ')[0];
@@ -3290,7 +3426,8 @@ function startGame(cont){
   document.body.classList.remove('menu');
   ac();
   stats.start = performance.now(); stats.deaths = 0;
-  loadLevel(cont ? store.get('best', 0) : 0);
+  const saved=cont&&pendingCampaign();
+  if(saved){loadLevel(saved.level,true,saved.room,saved.kit,saved.stage);missionElapsed=saved.elapsed;missionFound=saved.found;}else if(cont&&Object.keys(missionProgress().cleared).length){const id=missionProgress().unlocked;loadLevel(12+Math.floor(id/6),false,0,null,id%6);}else loadLevel(cont ? store.get('best', 0) : 0);
 }
 const beadBook=window.GraftBeads.create(store,{
   levelCount:()=>LEVELS.length,
@@ -3307,6 +3444,76 @@ const harbor=window.GraftHarbor.mount(store,{
 });
 $('btnHarbor').addEventListener('click',()=>harbor.open());
 $('pmHarbor').addEventListener('click',()=>harbor.open());
+elements=window.GraftElements.create({
+ stats:()=>isCampaign()?expedition.stats():{},visible:()=>isBossMission()&&campaignRoom===3,
+ surfaces:arenaSurfaces,objectives:()=>devices.filter(d=>d.type==='pylon'&&!d.used&&(d.order===undefined||!devices.some(o=>o.type==='pylon'&&!o.used&&o.order<d.order))).map(d=>({x:d.x,y:d.y-24,w:d.w,h:24,source:d})),objectiveHit:hitPylon,
+ selected:()=>LEVELS[level].boss!==undefined?chosenElement:null,ready:journeyReady,mask:()=>P.mask,bounds,face:()=>P.face,play:()=>state==='play'&&!editing&&!menuOpen&&!bookOpen,
+ solid:(x,y)=>boxSolid(x-1,y-1,2,2),overlap:rectOverlap,enemies:()=>enemies,damage:damageEnemy,
+ hurt:(x,y)=>damagePlayerNear(x,y,1),note:toast,burst,sound:()=>tone(350,650,.07,'triangle',.04),win:()=>{exitLocked=false;},
+ ui:(name,cd,boss)=>{$('btnSkill').textContent='攻击';$('skillReadout').textContent=(chosenElement?elementLabels[chosenElement]:name)+(cd>.05?' · 准备中 '+cd.toFixed(1)+' 秒':' · 按住攻击，自动瞄准');$('btnCast').disabled=state!=='play'||editing||menuOpen||bookOpen;$('btnSkill').disabled=state!=='play'||editing||menuOpen||bookOpen;
+ $('bossHud').classList.toggle('hide',!boss);if(boss){
+  const fighting=campaignRoom===3&&isBossMission();
+  $('bossName').textContent=fighting?boss.name+' · '+boss.hp+'/'+boss.max:(boss.index+1)+'-'+(missionStage+1)+' '+currentMission().name+' · '+campaign.clock(missionElapsed);
+  $('bossRule').textContent=fighting?(boss.hp<=0?'首领击破，前往右侧出口':!journeyReady()?'首领已在前方 · 向右进入战场':boss.transition>0?'阶段重整 · 留意预警':boss.shield?'用「'+boss.weakName+'」破盾 · 剩 '+boss.shield+' 层':'反击窗口 '+Math.max(0,boss.open).toFixed(1)+' 秒'):campaignStep().title;
+  $('bossHP').style.width=fighting?boss.hp/boss.max*100+'%':((campaignRoom+(exitLocked?0:1))/4*100)+'%';
+  $('routeRegions').textContent=campaign.WORLDS[boss.index].regions.map((n,i)=>(i<campaignRoom?'✓ ':i===campaignRoom?'● ':'')+n).join(' › ');
+  $('equippedReadout').textContent=expedition.state.gear.filter(Boolean).map(g=>window.GraftExpedition.RECIPES.find(r=>r.id===g.id).name+' '+g.level).join(' · ')||'未装组件 · 两颗火豆可拼双管炮';
+  $('btnForge').textContent='拼装 '+expedition.state.gear.filter(Boolean).length+'/3';
+ }}
+
+});
+$('btnSkill').addEventListener('pointerdown',e=>{e.preventDefault();if(state!=='play'||editing||menuOpen||bookOpen||skillPointer!==null)return;skillPointer=e.pointerId;try{$('btnSkill').setPointerCapture(e.pointerId);}catch(_){}elements.hold(true);elements.cast();});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('btnSkill').addEventListener(ev,e=>{if(e.pointerId===skillPointer){skillPointer=null;elements.hold(false);}});
+function equipForm(key){
+ if(!editing)return false;if(LEVELS[level].boss!==undefined&&!availableElements().includes(key)){toast('通关后会解锁这个元素');return false;}const pool={...P.bag};for(const id of P.mask)if(id)pool[matKey(id)]++;
+ const next=new Uint8Array(64);for(let j=2;j<=4;j++)for(let i=2;i<=3;i++)next[j*8+i]=1;
+ const shapes={stone:[[4,3,3],[4,4,3]],fire:[[2,1,5],[3,1,5]],water:[[4,3,4],[5,3,4]],grass:[[1,3,2],[1,4,2]],light:[[2,1,6],[3,1,6]],steam:[[4,3,5],[5,3,4]]};
+ if(!shapes[key])return false;for(const [i,j,id]of shapes[key])next[j*8+i]=id;
+ for(const id of next)if(id){const k=matKey(id);if(!pool[k]){toast('材料不足，先拾取对应的功能豆');return false;}pool[k]--;}
+ const old=P.mask.slice(),oldY=P.py,oldX=P.px,oldB=bounds();P.mask.set(next);const nb=bounds();P.py+=oldB.y+oldB.h-nb.y-nb.h;P.px+=oldB.x+oldB.w/2-nb.x-nb.w/2;
+ const b=bounds();if(boxSolid(b.x,b.y,b.w,b.h)||devices.some(d=>(d.type==='lift'||d.type==='vine'&&d.grown)&&rectOverlap(b,d))){P.mask.set(old);P.py=oldY;P.px=oldX;toast('空间不足，先到开阔处拼形态');return false;}
+ P.bag=pool;P.sel=key==='steam'?'water':key;if(LEVELS[level].boss!==undefined)chosenElement=key;hist=[];syncBag();syncUndo();elements.hold(false);toast('已切换：'+(elementLabels[key]||window.GraftElements.SKILLS[key].name));return true;
+}
+const formList=$('elementForms');for(const key of Object.keys(window.GraftElements.SKILLS).filter(k=>k!=='basic')){const b=document.createElement('button');b.type='button';b.textContent=window.GraftElements.SKILLS[key].name;b.addEventListener('click',()=>equipForm(key));formList.appendChild(b);}
+function spawnJourneyWave(wave){
+ const hard=campaignDifficulty==='hard',count=2+(hard||campaignRoom===2||LEVELS[level].boss>=2?1:0);
+ for(let i=0;i<count;i++){const elite=(hard||campaignRoom===2)&&i===count-1,hp=(wave?9:6)+(elite?9:0);enemies.push({uid:campaignRoom+'-'+wave+'-'+i,x:Math.min(440,(wave?wave===2?365:290:155)+i*32),y:300,w:elite?24:16,h:elite?20:16,hp,maxhp:hp,elite,role:wave>0&&i===0?'ranged':'melee',shootT:2,affinity:wave?['grass','water','stone','grass','dark'][LEVELS[level].boss]:'fire',mat:wave?['grass','water','stone','grass','stone'][LEVELS[level].boss]:'fire',hard:1,speed:wave>0&&i===0?0:hard?34:24,vx:0,vy:0,onGround:false,cd:1.4,flash:0,big:false,born:.5,wind:0,sq:1,eyeOff:0,inv:0});const e=enemies[enemies.length-1];while(boxSolid(e.x,e.y,e.w,e.h)&&e.y>80)e.y-=8;}
+}
+function spawnFinalGuards(){
+ const pairs=[['water','fire'],['grass','water'],['stone','fire'],['fire','grass'],['light','water']][LEVELS[level].boss];
+ for(const [i,x,foot]of [[0,208,320],[1,360,280],[2,512,248]]){
+  const mat=['fire','grass','water'][i],affinity=LEVELS[level].boss===0?(i===1?'grass':'fire'):['grass','water','stone','grass','dark'][LEVELS[level].boss];
+  enemies.push({uid:'final-'+i,x,y:foot-20,w:20,h:20,hp:16,maxhp:16,elite:true,role:'ranged',shootT:2+i*.4,affinity,mat,hard:1,speed:0,vx:0,vy:0,onGround:false,cd:1.4,flash:0,big:false,born:.5,wind:0,sq:1,eyeOff:0,inv:0});
+ }
+}
+function availableElements(){const c=LEVELS[level].boss||0;return ['water','fire',...(c>=1?['grass']:[]),...(c>=2?['stone']:[]),...(c>=3?['steam']:[]),...(c>=4?['light']:[])];}
+function switchElement(key){
+ if(state!=='play'||menuOpen||bookOpen||!availableElements().includes(key))return false;
+ const was=editing;editing=true;const ok=equipForm(key);editing=was;chosenElement=key;if(!ok)toast('已切换：'+elementLabels[key]+'；受损外形暂时保留');elements.hold(skillPointer!==null);
+ for(const b of $('elementChoices').children)b.classList.toggle('selected',b._element===key);
+ $('skillReadout').textContent=elementLabels[key]+' · 按住攻击';return true;
+}
+const elementLabels={water:'水 · 远射',fire:'火 · 连射',grass:'草 · 控场',stone:'岩 · 近战',light:'光 · 驱暗',steam:'雾 · 范围'};
+for(const key of Object.keys(elementLabels)){const b=document.createElement('button');b.type='button';b.textContent=elementLabels[key];b._element=key;b.addEventListener('click',()=>switchElement(key));$('elementChoices').appendChild(b);}
+const refreshElements=()=>{Array.from($('elementChoices').children).forEach(b=>{b.hidden=!availableElements().includes(b._element);b.classList.toggle('selected',b._element===chosenElement);});};
+forge=window.GraftExpedition.mount(expedition,{
+ allowed:()=>state==='play'&&isCampaign()&&!menuOpen&&!bookOpen&&!editing,
+ open(){bookOpen=true;clearInput();document.body.classList.add('forging');$('wrap').inert=true;$('pad').inert=true;},
+ close(){bookOpen=false;clearInput();document.body.classList.remove('forging');$('wrap').inert=false;$('pad').inert=false;refreshJourney();},
+ change(){if(checkpoint&&checkpoint.campaign)checkpoint.campaign.kit=expedition.snapshot();saveCampaignRun();refreshJourney();},style:()=>window.GraftPresentation.style,sound:()=>arp([523,659,784],55),
+});
+$('btnForge').addEventListener('click',()=>forge.open());
+$('btnCast').addEventListener('click',()=>elements.cast());$('btnSkill').addEventListener('click',()=>elements.cast());
+const missionSelect=window.GraftPresentation.mount(store,{
+ unlocked:()=>localReview?4:Math.floor(missionProgress().unlocked/6),unlockedStage:world=>localReview?5:Math.min(5,missionProgress().unlocked-world*6),records:()=>missionProgress().cleared,preferredStage:()=>state==='play'&&isCampaign()?missionStage:Math.max(0,Math.min(5,missionProgress().unlocked%6)),preferred:()=>state==='play'&&LEVELS[level].boss!==undefined?LEVELS[level].boss:localReview?0:Math.min(4,store.get('elementChapter',0)),
+ open(){closeEditor(true);closeMenu(true);bookOpen=true;clearInput();document.body.classList.add('planning');},
+ close(){bookOpen=false;clearInput();document.body.classList.remove('planning');},
+ start(chapter,difficulty,stage){campaignDifficulty=difficulty;store.set('campaignDifficulty',difficulty);ov.classList.add('hide');document.body.classList.remove('menu');stats.start=performance.now();loadLevel(12+chapter,false,0,null,stage);},
+});
+$('btnExpedition').addEventListener('click',()=>missionSelect.open());
+$('pmMission').addEventListener('click',()=>missionSelect.open());
+
+
 $('btnBook').addEventListener('click',()=>beadBook.open());
 $('pmBook').addEventListener('click',()=>beadBook.open());
 $('btnStart').addEventListener('click', ()=> startGame(false));
@@ -3377,7 +3584,7 @@ window.__game = {
   get cam(){ return cam; },
   key: (code, down)=>{ keys[code] = !!down; if (down && code === 'Space') pressJump(); if (!down && code === 'Space') releaseJump(); },
   step: (dt)=> update(dt),
-  harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
+  missionSelect,expedition,forge,campaign,get missionStage(){return missionStage;},get missionElapsed(){return missionElapsed;},get field(){return field;},advanceExpeditionRoom,get campaignRoom(){return campaignRoom;},get campaignDifficulty(){return campaignDifficulty;},elements,equipForm,switchElement,journeyReady,get journeyWave(){return journeyWave;},harbor, beadBook, quickBeads, jumpPower, tryMoveY, render, drawEditor, openEditor, closeEditor, get editing(){ return editing; }, nearestEditable,
   routeStep, refreshJourney, nextLevel, continueJourney,
   get quality(){ return quality; },
 };

@@ -1,0 +1,44 @@
+(function(){'use strict';
+const NAMES=window.GraftCampaign.WORLDS.map(w=>w.name);
+const NOTES=window.GraftCampaign.WORLDS.map(w=>'六关路线 · 世界首领：'+w.boss);
+const COLORS={water:'#79cde9',fire:'#f5a06e',stone:'#bac5dc',grass:'#a6cf88',light:'#fff0b3',steam:'#bbb1e1'};
+let pilot='armor';
+function rig(p,b,element,face,style){
+ const c=COLORS[element]||'#79cde9',s=style||pilot,x=b.x,y=b.y,w=b.w,h=b.h;
+ p.save();p.fillStyle='#182737';p.fillRect(x+1,y+1,Math.max(2,w-2),Math.min(7,h-1));
+ p.fillStyle=c;p.fillRect(x+3,y+3,Math.max(2,w-6),2);p.fillStyle='#eaf6ff';p.fillRect(face<0?x+2:x+w-4,y+3,2,2);
+ if(h>13){p.fillStyle='#263b50';p.fillRect(x+2,y+8,Math.max(2,w-4),Math.min(h-9,7));p.fillStyle=c;p.fillRect(x+w/2-2,y+10,4,3);p.fillStyle='#182737';p.fillRect(x+w/2-1,y+h-6,2,6);}
+ if(s==='cloak'){p.fillStyle='#29364f';p.beginPath();p.moveTo(x+(face>0?0:w),y+6);p.lineTo(x-face*6+(face>0?0:w),y+h-1);p.lineTo(x+w/2,y+h-5);p.fill();}
+ else if(s==='blade'){p.strokeStyle=c;p.lineWidth=2;p.beginPath();p.moveTo(x+(face>0?w:0),y+h-5);p.lineTo(x+(face>0?w+6:-6),y-3);p.stroke();p.fillStyle='#25364e';p.fillRect(x+w/2-1,y-3,3,5);}
+ else{p.fillStyle='#54718a';p.fillRect(x-2,y+6,4,5);p.fillRect(x+w-2,y+6,4,5);p.fillStyle=c;p.fillRect(x-2,y+6,4,1);p.fillRect(x+w-2,y+6,4,1);}
+ p.restore();
+}
+function hero(canvas,element,style){
+ const p=canvas.getContext('2d'),w=canvas.width,h=canvas.height,s=style||pilot,c=COLORS[element]||COLORS.water,scale=Math.min(w/36,h/34);p.clearRect(0,0,w,h);p.save();p.translate(w/2-15*scale,h/2-15*scale);p.scale(scale,scale);
+ if(s==='cloak'){p.fillStyle='#363c5b';p.beginPath();p.moveTo(11,6);p.lineTo(2,28);p.lineTo(16,24);p.lineTo(21,8);p.fill();}
+ const cells=[];for(let j=0;j<3;j++)for(let i=4;i<=6;i++)cells.push([i,j]);for(let j=3;j<7;j++)for(let i=3;i<=7;i++)cells.push([i,j]);for(let j=3;j<6;j++)for(const i of [2,8])cells.push([i,j]);for(let j=7;j<10;j++)for(const i of [3,4,6,7])cells.push([i,j]);
+ for(const [i,j]of cells){const x=i*3,y=j*3;p.fillStyle='#172a3a';p.fillRect(x,y,3,3);p.fillStyle=(i===2||i===8)?c:s==='blade'?'#8f9db5':'#728ba2';p.fillRect(x+.25,y+.25,2.5,2.5);p.fillStyle='#2b4257';p.beginPath();p.arc(x+1.5,y+1.5,.45,0,Math.PI*2);p.fill();}
+ p.fillStyle='#1b3042';p.fillRect(12,1,9,7);p.fillStyle=c;p.fillRect(13,3,7,2);p.fillStyle='#ebfaff';p.fillRect(18,3,2,1);p.fillStyle='#1c3245';p.fillRect(12,12,9,6);p.fillStyle=c;p.fillRect(14,13,5,3);
+ if(s==='blade'){p.strokeStyle='#e1f7ff';p.lineWidth=1;p.beginPath();p.moveTo(25,25);p.lineTo(31,7);p.stroke();p.strokeStyle=c;p.lineWidth=2;p.beginPath();p.moveTo(26,23);p.lineTo(31,9);p.stroke();p.fillStyle='#263c50';p.fillRect(24,23,5,2);}else if(s==='armor'){p.fillStyle='#233b50';p.fillRect(25,13,7,6);p.fillStyle=c;p.fillRect(26,14,6,2);}else{p.fillStyle='#29324e';p.fillRect(11,0,11,3);p.fillRect(10,2,3,5);p.fillRect(20,2,3,5);}
+ p.restore();
+}
+function landscape(canvas,i){const p=canvas.getContext('2d'),w=canvas.width,h=canvas.height,col=['#e1966b','#78b5cd','#b1bed0','#92b895','#aca0cd'][i];p.fillStyle='#1b2b3b';p.fillRect(0,0,w,h);p.fillStyle=col;p.globalAlpha=.17;for(let n=0;n<8;n++)p.fillRect(n*31,10+(n%3)*9,14,100);p.globalAlpha=1;p.fillStyle='#425b70';for(let n=0;n<5;n++)p.fillRect(n*46,h-18-(n%2)*20,35,8);p.fillStyle=col;if(i===0){p.fillRect(0,h-10,w,10);p.beginPath();p.moveTo(45,h-18);p.lineTo(83,15);p.lineTo(120,h-18);p.fill();}else if(i===1){p.globalAlpha=.5;p.fillRect(0,h-32,w,32);p.globalAlpha=1;p.fillRect(70,28,70,5);}else if(i===2){p.strokeStyle=col;p.lineWidth=3;p.strokeRect(50,12,65,52);p.beginPath();p.moveTo(50,12);p.lineTo(115,64);p.stroke();}else if(i===3){for(let j=0;j<4;j++){p.fillRect(30+j*45,30,3,38);p.beginPath();p.arc(32+j*45,30,12,0,Math.PI*2);p.fill();}}else{p.beginPath();p.arc(w/2,38,24,0,Math.PI*2);p.fill();p.fillStyle='#24384b';p.beginPath();p.arc(w/2,38,16,0,Math.PI*2);p.fill();}p.fillStyle=col;p.fillRect(22,h-34,12,16);p.fillStyle='#e7f0f4';p.fillRect(24,h-31,8,2);p.strokeStyle=col;p.beginPath();p.moveTo(w-39,h-55);p.lineTo(w-39,h-18);p.lineTo(w-18,h-18);p.stroke();p.save();p.translate(w-65,18);p.scale(.8,.8);const b=window.GraftElements.BOSSES[i];window.GraftBossArt.draw(p,{...b,index:i,x:0,y:0,shield:0,pose:0,flash:0,root:0},0,COLORS[b.weak[0]]);p.restore();}
+function mount(store,hooks){
+ const $=id=>document.getElementById(id);let active=false,selected=0,stage=0,difficulty=store.get('campaignDifficulty','normal')==='hard'?'hard':'normal',focus=null;pilot=['armor','blade','cloak'].includes(store.get('pilotStyle','armor'))?store.get('pilotStyle','armor'):'armor';
+ function render(){hero($('pilotPreview'),'water',pilot);const m=window.GraftCampaign.mission(selected,stage);$('missionTitle').textContent=(selected+1)+'-'+(stage+1)+' '+m.name;$('missionDesc').textContent=m.tip;$('missionWorldTitle').textContent=window.GraftCampaign.WORLDS[selected].name;$('missionWorldStory').textContent=window.GraftCampaign.WORLDS[selected].subtitle;$('missionDifficulty').textContent=difficulty==='hard'?'挑战 · 精英加强 · 约 2–3 分钟':'标准 · 单关约 2 分钟 · 无倒计时';$('missionStart').disabled=selected>hooks.unlocked()||stage>hooks.unlockedStage(selected);
+ const list=$('missionList');list.textContent='';NAMES.forEach((name,i)=>{const b=document.createElement('button');b.type='button';b.className='mission-card'+(i===selected?' selected':'');b.disabled=i>hooks.unlocked();b.setAttribute('aria-pressed',String(i===selected));const c=document.createElement('canvas');c.width=220;c.height=86;landscape(c,i);const text=document.createElement('div'),n=document.createElement('small'),title=document.createElement('strong'),sub=document.createElement('span');n.textContent=String(i+1).padStart(2,'0');title.textContent=window.GraftCampaign.WORLDS[i].shortName;sub.textContent=b.disabled?'完成上一章后解锁':'六关 · '+window.GraftElements.BOSSES[i].name;text.append(n,title,sub);b.append(c,text);b.addEventListener('click',()=>{selected=i;stage=0;render();});list.appendChild(b);});
+ const stages=$('missionStages');stages.textContent='';for(let i=0;i<6;i++){
+  const m=window.GraftCampaign.mission(selected,i),record=hooks.records()[m.id],b=document.createElement('button');b.type='button';b.className='stage-card'+(i===stage?' selected':'')+(i===5?' boss-stage':'');b.disabled=i>hooks.unlockedStage(selected);b.setAttribute('aria-pressed',String(i===stage));
+  const num=document.createElement('small'),name=document.createElement('strong'),kind=document.createElement('span');num.textContent=(selected+1)+'-'+(i+1);name.textContent=m.name;kind.textContent=b.disabled?'完成前一关后解锁':record?'★'.repeat(record.stars)+' · '+window.GraftCampaign.clock(record.best):m.label+' · 约 2 分钟';b.append(num,name,kind);b.addEventListener('click',()=>{stage=i;render();});stages.appendChild(b);
+ }
+ Array.from($('pilotStyles').children).forEach(b=>b.classList.toggle('selected',b._style===pilot));Array.from($('missionModes').children).forEach(b=>b.classList.toggle('selected',b._mode===difficulty));
+ }
+ function close(){if(!active)return;active=false;$('missionSelect').classList.add('hide');hooks.close();if(focus&&focus.focus)focus.focus();}
+ function open(){if(active)return;focus=document.activeElement;selected=Math.min(4,hooks.preferred?hooks.preferred():hooks.unlocked());stage=Math.max(0,Math.min(5,hooks.preferredStage?hooks.preferredStage():hooks.unlockedStage(selected)));active=true;hooks.open();$('missionSelect').classList.remove('hide');render();$('missionList').scrollTop=selected*90;$('missionClose').focus();}
+ for(const [key,name]of [['armor','机甲'],['blade','战衣'],['cloak','斗篷']]){const b=document.createElement('button');b.type='button';b._style=key;b.textContent=name;b.addEventListener('click',()=>{pilot=key;store.set('pilotStyle',key);render();});$('pilotStyles').appendChild(b);}
+ for(const [key,name]of [['normal','标准'],['hard','挑战']]){const b=document.createElement('button');b.type='button';b._mode=key;b.textContent=name;b.addEventListener('click',()=>{difficulty=key;render();});$('missionModes').appendChild(b);}
+ $('missionClose').addEventListener('click',close);$('missionStart').addEventListener('click',()=>{if(selected>hooks.unlocked()||stage>hooks.unlockedStage(selected))return;close();hooks.start(selected,difficulty,stage);});
+ $('missionSelect').addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape')close();if(e.key==='Tab'){const a=Array.from($('missionSelect').querySelectorAll('button:not(:disabled)')).filter(b=>b.getClientRects().length);if(e.shiftKey&&document.activeElement===a[0]){e.preventDefault();a[a.length-1].focus();}else if(!e.shiftKey&&document.activeElement===a[a.length-1]){e.preventDefault();a[0].focus();}}});
+ return {open,close,get active(){return active;},get style(){return pilot;},get stage(){return stage;}};
+}
+window.GraftPresentation={mount,hero,rig,landscape,get style(){return pilot;},names:NAMES};})();

@@ -25,6 +25,6 @@ for(const active of [{stage:99},{stage:0,pool:[1],tray:[],stock:[],groups:[],sta
 G.loadLevel(0);for(let i=0;i<30;i++)G.step(1/60);const bag=JSON.stringify(G.P.bag),mask=Array.from(G.P.mask),pos=G.P.px;G.harbor.open();G.key('KeyD',true);for(let i=0;i<20;i++)G.step(1/60);assert.equal(G.P.px,pos);solve(G.harbor.model);assert(G.beadBook.completed.includes('sprout'));assert.equal(G.beadBook.worn,'sprout');assert.equal(G.beadBook.total(),0);assert.equal(JSON.stringify(G.P.bag),bag);assert.deepEqual(Array.from(G.P.mask),mask);G.harbor.close();G.step(1/60);assert.equal(G.P.px,pos);
 console.log('PASS 六种图纸 240 次变序可解、解锁、篮满撤回恢复、坏存档、成品入册、进度隔离与输入暂停');
 
-const home=boot();home.win.dispatchEvent({type:'keydown',code:'Enter',preventDefault(){}});assert(home.G.harbor.active,'首页默认键盘入口应进入豆岛');home.G.harbor.close();
+const home=boot();home.win.dispatchEvent({type:'keydown',code:'Enter',preventDefault(){}});assert(home.G.missionSelect.active,'首页默认键盘入口应进入战役目录');home.G.missionSelect.close();
 
 assert(G.beadBook.awardPattern('drop'));G.beadBook.open('drop');assert.equal(els.bookName.textContent,'一滴海蓝','查看成品应定位到对应作品');G.beadBook.close();
