@@ -7,8 +7,19 @@ node --check src/game.js
 node --check src/beads.js
 node --check src/harbor.js
 node --check src/elements.js
+node --check src/boss-art.js
+node --check src/expedition.js
+node --check src/campaign.js
+node tests/campaign.js
+node tests/campaign-pace.js
+node tests/expedition.js
+node tests/expedition-routes.js
+GRAFT_TEST_FPS=30 node tests/expedition-routes.js
+GRAFT_TEST_FPS=120 node tests/expedition-routes.js
 node tests/elements.js
+node tests/multilayer.js
 node tests/journey-controls.js
+node tests/local-redesign.js
 node tests/smoke.js | tail -1
 node tests/playthrough.js
 node tests/combat.js
